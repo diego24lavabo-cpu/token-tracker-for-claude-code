@@ -6,6 +6,10 @@ directories:
   output: release
   buildResources: build
 
+# better-sqlite3 is a Node-API module with prebuilt binaries that work in Electron as they
+# are, so there is nothing to rebuild.
+npmRebuild: false
+
 files:
   - dist/**
   - dist-electron/**

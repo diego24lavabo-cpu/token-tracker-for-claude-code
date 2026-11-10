@@ -46,6 +46,10 @@ CI runs them on macOS and Windows, so keep both path styles in mind (`/Users/ale
 
 **Parsing.** The Claude Code log format is undocumented and changes between versions. Parsing code must skip what it does not understand and never crash. When you fix a parsing bug, add a synthetic fixture that reproduces it.
 
+**Database.** `messages` is the source of truth: one row per deduplicated response, never deleted. `hourly`, `sessions` and `subagents` are derived from it and must stay rebuildable from it alone. Schema changes go through a new entry in `MIGRATIONS` in `electron/db.ts`; never edit a migration that has shipped.
+
+**Native module.** `better-sqlite3` ships prebuilt Node-API binaries that work in both Node (tests) and Electron (the app). Install scripts are disabled in `.npmrc`, so `npm install` never compiles anything.
+
 ## Commits and pull requests
 
 - Keep pull requests focused on one change.

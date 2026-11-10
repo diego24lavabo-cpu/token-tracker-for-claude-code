@@ -1,5 +1,6 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig, type Plugin } from 'vite';
+import { notBundle } from 'vite-plugin-electron/plugin';
 import electron from 'vite-plugin-electron/simple';
 
 /** The packaged app loads only its own files: no remote scripts, styles, fonts or requests. */
@@ -66,6 +67,9 @@ export default defineConfig({
     electron({
       main: {
         entry: 'electron/main.ts',
+        // Keep the packages listed in `dependencies` (the native SQLite module) out of the
+        // bundle: they are loaded from node_modules at run time.
+        vite: { plugins: [notBundle()] },
         // Start Electron without the plugin's default `--no-sandbox` flag.
         onstart: ({ startup }) => {
           void startup(['.']);

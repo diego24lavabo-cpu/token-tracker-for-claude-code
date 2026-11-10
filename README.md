@@ -4,7 +4,7 @@ A desktop app for macOS and Windows that reads your local Claude Code session lo
 
 Everything runs locally. No account, no API key, no telemetry, no network calls.
 
-> **Status: early development.** The app is being built step by step (see [docs/SPEC.md](docs/SPEC.md)). The window, navigation and page shells exist; the data pages are next. Screenshots will be added with the first release, and they will always be taken in demo mode with generated sample data.
+> **Status: early development.** The app is being built step by step (see [docs/SPEC.md](docs/SPEC.md)). The window, the navigation and the log reader with its local database exist; the data pages are next. Screenshots will be added with the first release, and they will always be taken in demo mode with generated sample data.
 
 > Not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic.
 
@@ -44,6 +44,15 @@ Claude Code writes JSONL transcripts on your computer. The app scans every one o
 
 Only the usage numbers of each response are read (token counts, model, timestamps, project folder name). Only Claude Code is covered (CLI, IDE extensions, desktop Code tab); the claude.ai chat apps do not store per-message token counts locally.
 
+## How usage is counted
+
+- **Each response counts once.** Claude Code writes a streamed response as several lines and copies earlier lines when a session is resumed. Responses are deduplicated across all files by message id and request id.
+- **Four token types stay separate**: input, output, cache write and cache read. Total input is the sum of input, cache write and cache read, which is everything sent to Claude.
+- **Subagents are counted from their own transcripts** (`subagents/agent-*.jsonl`, workflow agents, `/btw` side questions, and the older inline format). The summary a parent session stores after a subagent run is ignored, so nothing is counted twice.
+- **A project is the folder where the session was started.** If the shell moves into a subfolder during a session, the usage stays with the project.
+- **Days and hours follow your system time zone.** Timestamps are stored in UTC.
+- **History is permanent.** Claude Code deletes old transcripts (after 30 days by default). The app copies the usage numbers into its own database and never removes them when a source file disappears.
+
 ## How sync works
 
 Sync is **off by default**. When you turn it on in Settings, the app writes small JSON files into a `ClaudeTokenTracker` folder inside your local **Google Drive for desktop** folder, and reads the files written by your other machines. There is no Google API, no OAuth and no server: the Drive client on your computer does the transfer.
@@ -65,7 +74,7 @@ What is **never** written: prompts, responses, code, file paths, subagent task d
 
 ## Build from source
 
-Requirements: [Node.js](https://nodejs.org) 22 or newer and git.
+Requirements: [Node.js](https://nodejs.org) 22.12 or newer and git. No C++ toolchain is needed: the SQLite module ships prebuilt binaries.
 
 ```sh
 git clone https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code.git

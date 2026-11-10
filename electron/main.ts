@@ -1,14 +1,18 @@
 import { app, BrowserWindow, ipcMain, screen, session, type IpcMainInvokeEvent } from 'electron';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { IPC } from '../shared/ipc';
 import type { AppInfo, Machine, Platform } from '../shared/types';
+import { UsageDatabase } from './db';
 import { installAppMenu } from './menu';
 import { defaultLogRoot, existingLogRoots, tildify } from './paths';
+import { formatSummary, scanLogs } from './scanner';
 
 const APP_ID = 'io.github.diego24lavabo-cpu.tokentracker';
 const APP_NAME = 'Token Tracker for Claude Code';
+const DATABASE_FILE = 'usage.db';
 
 // Colors mirror src/theme.css: the window paints them before the UI loads.
 const COLOR_BG_APP = '#0E0E0D';
@@ -23,10 +27,44 @@ const isDemo = process.env.TOKEN_TRACKER_DEMO === '1' || process.argv.includes('
 const RENDERER_INDEX = path.join(__dirname, '..', 'dist', 'index.html');
 
 let mainWindow: BrowserWindow | null = null;
+let database: UsageDatabase | null = null;
+let scanRunning = false;
+let quitting = false;
 
 function currentPlatform(): Platform {
   if (process.platform === 'darwin' || process.platform === 'win32') return process.platform;
   return 'linux';
+}
+
+/** Opens the permanent usage history. The app still starts when that fails. */
+function openDatabase(): void {
+  try {
+    const folder = app.getPath('userData');
+    fs.mkdirSync(folder, { recursive: true });
+    database = new UsageDatabase(path.join(folder, DATABASE_FILE), {
+      machineName: os.hostname(),
+      platform: currentPlatform(),
+    });
+  } catch (error) {
+    console.error('[db] Could not open the usage database:', error);
+  }
+}
+
+/** Reads what is new in the Claude Code logs, then tells the UI to refresh. */
+function scanUsage(): void {
+  if (!database || scanRunning) return;
+  scanRunning = true;
+  scanLogs(database, existingLogRoots())
+    .then((summary) => {
+      for (const line of formatSummary(summary)) console.log(line);
+      mainWindow?.webContents.send(IPC.usageUpdated);
+    })
+    .catch((error: unknown) => {
+      if (!quitting) console.error('[scan] The scan failed:', error);
+    })
+    .finally(() => {
+      scanRunning = false;
+    });
 }
 
 function createWindow(): void {
@@ -136,16 +174,7 @@ function registerIpc(): void {
     defaultLogRoot: tildify(defaultLogRoot()),
   }));
 
-  // Only this computer for now; other machines appear once sync is enabled.
-  handle<Machine[]>(IPC.getMachines, () => [
-    {
-      id: 'local',
-      name: os.hostname(),
-      platform: currentPlatform(),
-      isLocal: true,
-      lastSync: null,
-    },
-  ]);
+  handle<Machine[]>(IPC.getMachines, () => database?.listMachines() ?? []);
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -153,6 +182,8 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.setName(APP_NAME);
   if (process.platform === 'win32') app.setAppUserModelId(APP_ID);
+  // Development runs keep their own data folder, away from the installed app's history.
+  if (isDev) app.setPath('userData', path.join(app.getPath('appData'), `${APP_NAME} (dev)`));
 
   app.on('second-instance', () => {
     if (!mainWindow) return;
@@ -175,6 +206,15 @@ if (!app.requestSingleInstanceLock()) {
     if (!isDev) blockNetwork();
     installAppMenu(isDev);
     registerIpc();
+    // Demo mode shows sample data and never touches the real history.
+    if (!isDemo) openDatabase();
     createWindow();
+    scanUsage();
+  });
+
+  app.on('will-quit', () => {
+    quitting = true;
+    database?.close();
+    database = null;
   });
 }
