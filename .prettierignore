@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dist-electron/
+out/
+release/
+coverage/
+package-lock.json
+docs/SPEC.md
+docs/mockup/
+tests/fixtures/
+CHANGELOG.md

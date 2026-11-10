@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Token Tracker for Claude Code">
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="#1C1B19" stroke="#2A2925" stroke-width="8" />
+  <rect x="124" y="268" width="68" height="120" rx="14" fill="#D97757" />
+  <rect x="124" y="216" width="68" height="40" rx="14" fill="#F2C4B0" />
+  <rect x="222" y="196" width="68" height="192" rx="14" fill="#D97757" />
+  <rect x="222" y="144" width="68" height="40" rx="14" fill="#F2C4B0" />
+  <rect x="320" y="236" width="68" height="152" rx="14" fill="#D97757" />
+  <rect x="320" y="184" width="68" height="40" rx="14" fill="#F2C4B0" />
+</svg>

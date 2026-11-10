@@ -1,0 +1,23 @@
+import { contextBridge, ipcRenderer } from 'electron';
+import { IPC } from '../shared/ipc';
+import type { Api, Platform } from '../shared/types';
+
+function currentPlatform(): Platform {
+  if (process.platform === 'darwin' || process.platform === 'win32') return process.platform;
+  return 'linux';
+}
+
+const api: Api = {
+  platform: currentPlatform(),
+  getAppInfo: () => ipcRenderer.invoke(IPC.getAppInfo),
+  getMachines: () => ipcRenderer.invoke(IPC.getMachines),
+  onUsageUpdated: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on(IPC.usageUpdated, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC.usageUpdated, listener);
+    };
+  },
+};
+
+contextBridge.exposeInMainWorld('api', api);

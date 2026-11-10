@@ -1,0 +1,54 @@
+name: Bug report
+description: Something does not work or the numbers look wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please do **not** paste real log content, prompts, file paths or project names you want to keep private.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect and what did you see instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the Sessions page
+        2. Click on ...
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: Shown in Settings.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows 11
+        - Windows 10
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: claude-code-version
+    attributes:
+      label: Claude Code version
+      description: Output of `claude --version`. The log format changes between versions.
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots are welcome if they show no private data. For wrong numbers, describe the shape of the log lines (field names), not their content.

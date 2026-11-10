@@ -1,0 +1,60 @@
+{
+  "name": "token-tracker-for-claude-code",
+  "productName": "Token Tracker for Claude Code",
+  "version": "0.1.0",
+  "description": "Local dashboard of your Claude Code token usage, for macOS and Windows.",
+  "license": "MIT",
+  "author": "Diego Pacchiani",
+  "homepage": "https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code.git"
+  },
+  "bugs": {
+    "url": "https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code/issues"
+  },
+  "private": true,
+  "main": "dist-electron/main.js",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "dev:demo": "cross-env TOKEN_TRACKER_DEMO=1 vite",
+    "build": "npm run typecheck && vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "cross-env": "^10.1.0",
+    "electron": "^45.3.0",
+    "electron-builder": "^26.18.0",
+    "eslint": "^10.14.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.14.0",
+    "lucide-react": "^1.71.0",
+    "prettier": "^3.9.10",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.5",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.2",
+    "vite": "^8.3.7",
+    "vite-plugin-electron": "^1.2.0",
+    "vitest": "^5.1.0"
+  }
+}

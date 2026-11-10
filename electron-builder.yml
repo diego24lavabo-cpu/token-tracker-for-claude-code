@@ -1,0 +1,29 @@
+appId: io.github.diego24lavabo-cpu.tokentracker
+productName: Token Tracker for Claude Code
+copyright: Copyright (c) 2026 Diego Pacchiani
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**
+  - dist-electron/**
+  - package.json
+
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

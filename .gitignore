@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-electron/
+out/
+release/
+*.tsbuildinfo
+
+# Environment and logs
+.env*
+*.log
+
+# Local data: never commit usage data, databases or exports
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite*
+*.jsonl
+!tests/fixtures/**/*.jsonl
+*.csv
+exports/
+pricing.json
+
+# Mockup reference images: local only, not published
+docs/mockup/
+Image References/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Test and tool caches
+coverage/
+.eslintcache
+.vite/
+
+# Claude Code local files
+.claude/
