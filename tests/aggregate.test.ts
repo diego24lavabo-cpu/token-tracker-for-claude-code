@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  comparePeriods,
   emptyOverview,
   getOverview,
   InvalidRequestError,
@@ -56,7 +57,8 @@ describe('getOverview', () => {
     expect(kpis.inputTokens).toBe(959 + 14400 + 49278);
     expect(kpis.outputTokens).toBe(497);
     expect(kpis.inputTokens + kpis.outputTokens).toBe(kpis.totalTokens);
-    expect(kpis.totalChange).toBeNull();
+    // Nothing happened in the two days before.
+    expect(kpis.totalChange).toEqual({ kind: 'new' });
     expect(kpis.cost).toBeCloseTo((959 * 1 + 497 * 10 + 14400 * 2 + 49278 * 0.5) / 1e6, 12);
     expect(kpis.costIsPartial).toBe(false);
   });
@@ -65,11 +67,27 @@ describe('getOverview', () => {
     const db = await fixtureDb();
     const lastDay = getOverview(db, PRICING, { from: '2026-11-10', to: '2026-11-10' }, EVENING);
     expect(lastDay.kpis.totalTokens).toBe(60349 + 1110);
-    expect(lastDay.kpis.totalChange).toBeCloseTo((61459 - 3675) / 3675, 12);
+    // The day before had 6% of this day's usage: enough to compare with.
+    const change = lastDay.kpis.totalChange;
+    expect(change.kind).toBe('change');
+    expect(change.kind === 'change' && change.ratio).toBeCloseTo((61459 - 3675) / 3675, 12);
 
     const dayBefore = getOverview(db, PRICING, { from: '2026-11-09', to: '2026-11-09' }, EVENING);
     expect(dayBefore.kpis.totalTokens).toBe(3675);
-    expect(dayBefore.kpis.totalChange).toBeNull();
+    expect(dayBefore.kpis.totalChange).toEqual({ kind: 'new' });
+
+    // A day without usage after a day with some: a full drop.
+    const after = getOverview(db, PRICING, { from: '2026-11-11', to: '2026-11-11' }, EVENING);
+    expect(after.kpis.totalChange).toEqual({ kind: 'change', ratio: -1 });
+  });
+
+  it('calls a period new activity when the one before had under 5% of its usage', () => {
+    expect(comparePeriods(1000, 0)).toEqual({ kind: 'new' });
+    expect(comparePeriods(1000, 49)).toEqual({ kind: 'new' });
+    expect(comparePeriods(1000, 50)).toEqual({ kind: 'change', ratio: 19 });
+    expect(comparePeriods(1000, 1000)).toEqual({ kind: 'change', ratio: 0 });
+    expect(comparePeriods(0, 500)).toEqual({ kind: 'change', ratio: -1 });
+    expect(comparePeriods(0, 0)).toEqual({ kind: 'none' });
   });
 
   it('leaves models without a price out of the cost and says so', async () => {
@@ -165,7 +183,7 @@ describe('getOverview', () => {
       EVENING,
     );
     expect(other.hasData).toBe(false);
-    expect(other.kpis).toMatchObject({ totalTokens: 0, cost: null, totalChange: null });
+    expect(other.kpis).toMatchObject({ totalTokens: 0, cost: null, totalChange: { kind: 'none' } });
     expect(other.shortcuts.project).toBeNull();
     expect(other.shortcuts.model).toBeNull();
     expect(other.shortcuts.sessions).toEqual({ count: 0, averageTokens: 0 });
@@ -195,7 +213,7 @@ describe('getOverview', () => {
       totalTokens: 0,
       inputTokens: 0,
       outputTokens: 0,
-      totalChange: null,
+      totalChange: { kind: 'none' },
       cost: null,
       costIsPartial: false,
     });

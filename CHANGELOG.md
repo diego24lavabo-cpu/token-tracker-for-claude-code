@@ -19,4 +19,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Overview page: total, input and output tokens, estimated cost, tokens per day, and shortcut cards to every section, filtered by machine and period.
 - Cost estimate at API prices from an editable `pricing.json`, with 1-hour cache writes priced separately.
 - Active time for sessions and subagent runs: pauses longer than 30 minutes are left out.
+- Container folders: a folder flagged as holding several projects is split by the directory directly under it.
+- The period comparison shows "New activity" when the period before had less than 5% of the usage.
 - Repository files: license, contribution guide, security policy, issue and pull request templates, CI workflow.

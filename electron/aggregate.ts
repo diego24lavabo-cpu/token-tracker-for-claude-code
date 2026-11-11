@@ -9,6 +9,7 @@ import type {
   Filters,
   Overview,
   OverviewShortcuts,
+  PeriodChange,
   Pricing,
 } from '../shared/types';
 import type { UsageDatabase } from './db';
@@ -18,6 +19,8 @@ const TOKENS = 'input + output + cache_write + cache_read';
 const INPUT_TOKENS = 'input + cache_write + cache_read';
 
 const KINDS: readonly AgentKind[] = ['main', 'task', 'workflow', 'aside', 'warmup'];
+/** Below this share of the current usage, the period before is too small to compare with. */
+const NEW_ACTIVITY_THRESHOLD = 0.05;
 /** The longest range a query accepts, to keep a wrong request from building a huge result. */
 const MAX_RANGE_DAYS = 3 * 366;
 const MAX_LIST_LENGTH = 500;
@@ -107,6 +110,13 @@ function startDayWhere(filters: Filters): Where {
 
 function ratio(part: number, whole: number): number {
   return whole > 0 ? part / whole : 0;
+}
+
+/** Compares a total with the one of the period just before. */
+export function comparePeriods(current: number, previous: number): PeriodChange {
+  if (current <= 0 && previous <= 0) return { kind: 'none' };
+  if (previous < current * NEW_ACTIVITY_THRESHOLD) return { kind: 'new' };
+  return { kind: 'change', ratio: (current - previous) / previous };
 }
 
 interface ModelTotals {
@@ -271,7 +281,7 @@ export function getOverview(
       totalTokens,
       inputTokens,
       outputTokens,
-      totalChange: previousTotal > 0 ? (totalTokens - previousTotal) / previousTotal : null,
+      totalChange: comparePeriods(totalTokens, previousTotal),
       cost: pricedModels > 0 ? cost : null,
       costIsPartial: pricedModels > 0 && unpricedModels > 0,
     },
@@ -305,7 +315,7 @@ export function emptyOverview(filters: Filters): Overview {
       totalTokens: 0,
       inputTokens: 0,
       outputTokens: 0,
-      totalChange: null,
+      totalChange: { kind: 'none' },
       cost: null,
       costIsPartial: false,
     },

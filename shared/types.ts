@@ -72,16 +72,22 @@ export interface Pricing {
 
 // ── Overview ──────────────────────────────────────────────────────────────────
 
+/**
+ * A total compared with the period of the same length just before.
+ * - `change`: `ratio` is the change (0.18 = +18%).
+ * - `new`: the period before had less than 5% of this one's usage, so a percentage would
+ *   only exaggerate (+10,000%).
+ * - `none`: neither period has usage.
+ */
+export type PeriodChange = { kind: 'change'; ratio: number } | { kind: 'new' } | { kind: 'none' };
+
 export interface OverviewKpis {
   totalTokens: number;
   /** Everything sent to Claude: input + cache write + cache read. */
   inputTokens: number;
   outputTokens: number;
-  /**
-   * Change of `totalTokens` against the period of the same length just before, as a
-   * ratio (0.18 = +18%). Null when that period has no usage.
-   */
-  totalChange: number | null;
+  /** How `totalTokens` compares with the period of the same length just before. */
+  totalChange: PeriodChange;
   /** Estimated cost at API prices, in US dollars. Null when no model used has a price. */
   cost: number | null;
   /** True when part of the usage has no price and is left out of `cost`. */

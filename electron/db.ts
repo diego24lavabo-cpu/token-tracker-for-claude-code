@@ -250,6 +250,19 @@ function activeTime(partition: string): string {
      )`;
 }
 
+/**
+ * The project a response is reported under. A session folder flagged as a container (a
+ * folder that holds several projects, such as the one an editor opens) is split by the
+ * directory directly under it; any other folder is one project. 'messages' keeps the raw
+ * folder project and subfolder, so changing the flags only rebuilds the derived tables.
+ */
+const PROJECT_NAME = `
+  CASE WHEN subfolder <> '' AND project IN (SELECT value FROM json_each(@containers))
+       THEN subfolder ELSE project END`;
+
+/** The columns of 'messages' plus the reported project, for the 'scoped' CTEs below. */
+const SCOPED_COLUMNS = `*, ${PROJECT_NAME} AS project_name`;
+
 const EVERYTHING: Scope = { agents: '1', buckets: '1', sessions: '1' };
 
 const TOUCHED: Scope = {
@@ -266,7 +279,7 @@ function refreshStatements(scope: Scope): string[] {
                             start_ts, end_ts, start_day, calls, startup_input,
                             input, output, cache_write, cache_read, cache_write_1h, active_ms)
      WITH scoped AS (
-       SELECT * FROM messages WHERE agent_id IS NOT NULL AND ${scope.agents}
+       SELECT ${SCOPED_COLUMNS} FROM messages WHERE agent_id IS NOT NULL AND ${scope.agents}
      ),${activeTime('session_id, agent_id')},
      agg AS (
        SELECT session_id, agent_id, MIN(kind) AS kind, COUNT(*) AS calls,
@@ -290,10 +303,10 @@ function refreshStatements(scope: Scope): string[] {
        FROM scoped GROUP BY session_id, agent_id, model
      ),
      by_project AS (
-       SELECT session_id, agent_id, project,
+       SELECT session_id, agent_id, project_name AS project,
               ROW_NUMBER() OVER (PARTITION BY session_id, agent_id
-                                 ORDER BY SUM(${TOKENS}) DESC, project) AS position
-       FROM scoped GROUP BY session_id, agent_id, project
+                                 ORDER BY SUM(${TOKENS}) DESC, project_name) AS position
+       FROM scoped GROUP BY session_id, agent_id, project_name
      )
      SELECT @machine, a.session_id, a.agent_id, p.project,
             COALESCE(meta.agent_type, '${UNKNOWN_AGENT_TYPE}'), ${EFFECTIVE_KIND}, m.model,
@@ -314,9 +327,9 @@ function refreshStatements(scope: Scope): string[] {
     `INSERT INTO hourly (machine_id, local_day, local_hour, project, model, kind, agent_type,
                          input, output, cache_write, cache_read, cache_write_1h, messages)
      WITH scoped AS (
-       SELECT * FROM messages WHERE ${scope.buckets}
+       SELECT ${SCOPED_COLUMNS} FROM messages WHERE ${scope.buckets}
      )
-     SELECT @machine, m.local_day, m.local_hour, m.project, m.model,
+     SELECT @machine, m.local_day, m.local_hour, m.project_name, m.model,
             CASE WHEN m.agent_id IS NULL THEN 'main' ELSE COALESCE(s.kind, m.kind) END,
             CASE WHEN m.agent_id IS NULL THEN ''
                  ELSE COALESCE(s.agent_type, '${UNKNOWN_AGENT_TYPE}') END,
@@ -332,7 +345,7 @@ function refreshStatements(scope: Scope): string[] {
                            messages, input, output, cache_write, cache_read, cache_write_1h,
                            subagent_count, subagent_tokens, active_ms)
      WITH scoped AS (
-       SELECT * FROM messages WHERE ${scope.sessions}
+       SELECT ${SCOPED_COLUMNS} FROM messages WHERE ${scope.sessions}
      ),${activeTime('session_id')},
      agg AS (
        SELECT session_id,
@@ -362,10 +375,10 @@ function refreshStatements(scope: Scope): string[] {
        FROM scoped GROUP BY session_id, model
      ),
      by_project AS (
-       SELECT session_id, project,
+       SELECT session_id, project_name AS project,
               ROW_NUMBER() OVER (PARTITION BY session_id
-                                 ORDER BY SUM(${TOKENS}) DESC, project) AS position
-       FROM scoped GROUP BY session_id, project
+                                 ORDER BY SUM(${TOKENS}) DESC, project_name) AS position
+       FROM scoped GROUP BY session_id, project_name
      )
      SELECT @machine, a.session_id, p.project, m.model,
             COALESCE(a.main_start, a.any_start), COALESCE(a.main_end, a.any_end), f.local_day,
@@ -521,6 +534,7 @@ interface FileRow {
 const SETTING_MACHINE_ID = 'machine_id';
 const SETTING_TIME_ZONE = 'time_zone';
 const SETTING_DERIVED_DIRTY = 'derived_dirty';
+const SETTING_CONTAINERS = 'container_projects';
 
 function defaultPlatform(): Platform {
   if (process.platform === 'darwin' || process.platform === 'win32') return process.platform;
@@ -588,6 +602,34 @@ export class UsageDatabase {
   /** The time zone used for local days and hours. */
   get timeZone(): string {
     return this.clock.timeZone;
+  }
+
+  /**
+   * Folder projects flagged as containers: folders that hold several projects, such as
+   * the one an editor opens. Their usage is reported under the directory directly below.
+   */
+  getContainerProjects(): string[] {
+    const stored = this.getSetting(SETTING_CONTAINERS);
+    if (!stored) return [];
+    try {
+      const value: unknown = JSON.parse(stored);
+      return Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === 'string' && item !== '')
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Replaces the container flags and rebuilds the derived tables to apply them. */
+  setContainerProjects(projects: readonly string[]): void {
+    const clean = [...new Set(projects.map((project) => project.trim()).filter(Boolean))].sort();
+    this.raw.transaction(() => {
+      this.setSetting(SETTING_CONTAINERS, JSON.stringify(clean));
+      this.setSetting(SETTING_DERIVED_DIRTY, '1');
+    })();
+    this.rebuildAll = true;
+    this.refreshDerived();
   }
 
   /** The local day (`YYYY-MM-DD`) of an instant, in that time zone. */
@@ -888,11 +930,14 @@ export class UsageDatabase {
       this.rebuildAll ||
       this.touchedBuckets.size + this.touchedSessions.size + agentCount > FULL_REBUILD_THRESHOLD;
 
+    const machine = this.machineId;
+    const containers = JSON.stringify(this.getContainerProjects());
     this.raw.transaction(() => {
       if (!full) this.fillTouchedTables();
       const scope = full ? EVERYTHING : TOUCHED;
       for (const sql of refreshStatements(scope)) {
-        this.raw.prepare(sql).run({ machine: this.machineId });
+        const params = sql.includes('@containers') ? { machine, containers } : { machine };
+        this.raw.prepare(sql).run(params);
       }
       this.setSetting(SETTING_DERIVED_DIRTY, '0');
     })();
@@ -934,7 +979,6 @@ export class UsageDatabase {
     const totals = this.raw
       .prepare(
         `SELECT COUNT(*) AS messages,
-                COUNT(DISTINCT project) AS projects,
                 COUNT(DISTINCT model) AS models,
                 COALESCE(SUM(input), 0) AS input,
                 COALESCE(SUM(output), 0) AS output,
@@ -944,7 +988,6 @@ export class UsageDatabase {
       )
       .get() as {
       messages: number;
-      projects: number;
       models: number;
       input: number;
       output: number;
@@ -964,7 +1007,8 @@ export class UsageDatabase {
       messages: totals.messages,
       sessions: count('SELECT COUNT(*) AS n FROM sessions WHERE machine_id = ?'),
       subagentRuns: count('SELECT COUNT(*) AS n FROM subagents WHERE machine_id = ?'),
-      projects: totals.projects,
+      // Counted as reported, after container folders are split.
+      projects: count('SELECT COUNT(DISTINCT project) AS n FROM hourly WHERE machine_id = ?'),
       models: totals.models,
       tokens: {
         input: totals.input,

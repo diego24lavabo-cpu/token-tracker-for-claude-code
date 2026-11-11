@@ -52,11 +52,12 @@ function KpiRow({ data }: { data: OverviewData | null }) {
       : NO_VALUE;
 
   let changeHint: string = NO_VALUE;
-  if (kpis) {
-    changeHint =
-      kpis.totalChange === null
-        ? t.kpi.noPrevious
-        : `${formatPercent(kpis.totalChange, { signed: true })} ${t.kpi.vsPrevious}`;
+  if (kpis?.totalChange.kind === 'change') {
+    changeHint = `${formatPercent(kpis.totalChange.ratio, { signed: true })} ${t.kpi.vsPrevious}`;
+  } else if (kpis?.totalChange.kind === 'new') {
+    changeHint = t.kpi.newActivity;
+  } else if (kpis) {
+    changeHint = t.kpi.noPrevious;
   }
 
   let costHint: string = t.kpi.costHint;

@@ -420,6 +420,71 @@ describe('derived tables', () => {
     );
   });
 
+  it('splits a container folder by the directory directly under it', () => {
+    const db = track(openMemoryDb());
+    const at = (minutes: number) => NOON + minutes * 60_000;
+    store(
+      db,
+      [
+        message({ dedupKey: 'a', timestamp: at(0), project: 'workspace', subfolder: 'alpha' }),
+        message({ dedupKey: 'b', timestamp: at(5), project: 'workspace', subfolder: 'alpha' }),
+        message({ dedupKey: 'c', timestamp: at(10), project: 'workspace', subfolder: '' }),
+        message({ dedupKey: 'd', sessionId: 's2', project: 'workspace', subfolder: 'beta' }),
+        message({
+          dedupKey: 'e',
+          timestamp: at(6),
+          project: 'workspace',
+          subfolder: 'alpha',
+          kind: 'task',
+          agentId: 'agent-1',
+          rank: RANK.subagent,
+        }),
+        message({ dedupKey: 'f', sessionId: 's3', project: 'other', subfolder: 'src' }),
+      ],
+      [agent({ agentId: 'agent-1' })],
+    );
+    const projects = () => tokensBy(db, 'hourly', 'project');
+    expect(projects()).toEqual({ workspace: 5 * 115, other: 115 });
+
+    db.setContainerProjects(['workspace', ' workspace ', '']);
+    expect(db.getContainerProjects()).toEqual(['workspace']);
+    // Responses made at the top of the folder keep its name; other folders are untouched.
+    expect(projects()).toEqual({ alpha: 3 * 115, beta: 115, workspace: 115, other: 115 });
+    expect(
+      db.raw.prepare('SELECT session_id, project FROM sessions ORDER BY session_id').all(),
+    ).toEqual([
+      { session_id: 's1', project: 'alpha' },
+      { session_id: 's2', project: 'beta' },
+      { session_id: 's3', project: 'other' },
+    ]);
+    expect(db.listSubagents()[0]?.project).toBe('alpha');
+    expect(db.stats().projects).toBe(4);
+    // Raw history is unchanged, so the flag can be removed again.
+    expect(
+      db.raw.prepare('SELECT DISTINCT project FROM messages ORDER BY 1').pluck().all(),
+    ).toEqual(['other', 'workspace']);
+    expect(tokenTotal(db, 'hourly')).toBe(tokenTotal(db));
+
+    // New usage arriving later is split too.
+    store(db, [
+      message({ dedupKey: 'g', sessionId: 's4', project: 'workspace', subfolder: 'gamma' }),
+    ]);
+    expect(projects().gamma).toBe(115);
+
+    db.setContainerProjects([]);
+    expect(projects()).toEqual({ workspace: 6 * 115, other: 115 });
+  });
+
+  it('survives a container setting it cannot read', () => {
+    const db = track(openMemoryDb());
+    db.setSetting('container_projects', '{"broken"');
+    expect(db.getContainerProjects()).toEqual([]);
+    db.setSetting('container_projects', '["a", 3, null, ""]');
+    expect(db.getContainerProjects()).toEqual(['a']);
+    store(db, [message({ dedupKey: 'a', project: 'a', subfolder: 'b' })]);
+    expect(tokensBy(db, 'hourly', 'project')).toEqual({ b: 115 });
+  });
+
   it('records the subfolder a response was made in, also when a later copy brings it', () => {
     const db = track(openMemoryDb());
     const subfolder = () => db.raw.prepare('SELECT subfolder FROM messages').pluck().get();
