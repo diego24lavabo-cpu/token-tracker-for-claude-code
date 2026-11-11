@@ -590,19 +590,483 @@ button {
   white-space: nowrap;
 }
 
+.swatch--main {
+  background: var(--accent);
+}
+
+.swatch--subagent {
+  background: var(--accent-dark);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.card-hint {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ── Tables ────────────────────────────────────────────────── */
+
+.table-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 20px 20px var(--space-3);
+}
+
+.table-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+/* A wide table scrolls sideways inside its card, never the page. */
+.data-table-scroll {
+  margin: 0 calc(-1 * var(--space-2));
+  overflow-x: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.data-table th {
+  padding: 6px var(--space-2) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: right;
+  vertical-align: bottom;
+}
+
+.data-table td {
+  padding: 9px var(--space-2);
+  text-align: right;
+}
+
+.data-table .is-start {
+  text-align: left;
+}
+
+.data-table td:first-child {
+  border-radius: var(--radius-control) 0 0 var(--radius-control);
+}
+
+.data-table td:last-child {
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+}
+
+.data-table-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-weight: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.data-table-sort:hover,
+.data-table-sort.is-active {
+  color: var(--text);
+}
+
+.data-table-sort svg {
+  color: var(--accent);
+}
+
+.data-table tr.is-selectable {
+  cursor: pointer;
+}
+
+.data-table tr.is-selectable:hover td {
+  background: #201f1c;
+}
+
+.data-table tr.is-selected td,
+.data-table tr.is-selected:hover td {
+  background: var(--accent-bg);
+}
+
+.data-table-select {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.data-table .data-table-empty {
+  padding: var(--space-6) 10px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.cell-name {
+  display: block;
+  max-width: 190px;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+
+.cell-accent {
+  color: var(--accent);
+}
+
+.cell-muted {
+  color: var(--text-muted);
+}
+
+.cell-share {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cell-share-track {
+  width: 52px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--heat-0);
+}
+
+.cell-share-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.cell-share .num {
+  min-width: 44px;
+  text-align: right;
+}
+
+.search-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+}
+
+.search-field:focus-within {
+  border-color: var(--accent);
+}
+
+.search-field input {
+  width: 180px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.search-field input::placeholder {
+  color: var(--text-muted);
+}
+
+/* ── Horizontal bars and split bars ────────────────────────── */
+
+.hbars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hbar {
+  display: grid;
+  grid-template-columns: minmax(80px, 38%) minmax(40px, 1fr) 48px;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 13px;
+}
+
+.hbar-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.hbar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hbar-detail {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.hbar-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--heat-0);
+}
+
+.hbar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.hbar-value {
+  text-align: right;
+}
+
+.split {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.split-bar {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--heat-0);
+}
+
+.split-part {
+  flex-basis: 0;
+  min-width: 2px;
+}
+
+.split-part--1 {
+  background: var(--accent);
+}
+
+.split-part--2 {
+  background: var(--accent-dark);
+}
+
+.split-part--3 {
+  background: var(--accent-light);
+}
+
+.split-part--4 {
+  background: var(--accent-pale);
+}
+
+.split-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  list-style: none;
+}
+
+.split-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.split-legend-item .num {
+  color: var(--text);
+}
+
+/* ── Projects page ─────────────────────────────────────────── */
+
+.kpi-grid--5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.projects-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-5);
+}
+
+.project-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+  padding: 20px;
+  border-color: var(--accent);
+  container-type: inline-size;
+  transition: opacity 120ms ease;
+}
+
+.project-panel.is-loading {
+  opacity: 0.7;
+}
+
+.project-panel-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+.project-panel-name {
+  color: var(--accent);
+}
+
+.project-panel-summary {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* The panel lays itself out from its own width, wherever it sits on the page. */
+.project-panel-grid {
+  display: grid;
+  grid-template-areas: 'daily' 'side' 'agents' 'hours';
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5) var(--space-6);
+}
+
+.panel-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.panel-block--daily {
+  grid-area: daily;
+}
+
+.panel-block--side {
+  grid-area: side;
+  gap: var(--space-5);
+}
+
+.panel-block--side > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.panel-block--agents {
+  grid-area: agents;
+}
+
+.panel-block--hours {
+  grid-area: hours;
+}
+
+.panel-block-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.panel-chart {
+  flex: none;
+}
+
+.panel-chart--daily {
+  height: 220px;
+}
+
+.panel-chart--hours {
+  height: 130px;
+}
+
+.panel-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+@container (min-width: 460px) {
+  .project-panel-grid {
+    grid-template-areas:
+      'daily daily'
+      'side agents'
+      'hours hours';
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+@container (min-width: 900px) {
+  .project-panel-grid {
+    grid-template-areas:
+      'daily side'
+      'hours agents';
+    grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  }
+}
+
 /* ── Window widths ─────────────────────────────────────────── */
 
-/* Large monitor: the six shortcuts fit on one line. */
+/* Large monitor: the six shortcuts fit on one line, the project panel sits next to the table. */
 @media (min-width: 1600px) {
   .shortcut-grid {
     grid-template-columns: repeat(6, minmax(0, 1fr));
   }
+
+  .projects-layout {
+    grid-template-columns: minmax(0, 2fr) minmax(460px, 1fr);
+  }
 }
 
-/* Minimum window width: the KPI cards wrap two by two. */
+/* Minimum window width: the KPI cards wrap two by two, or three by three for five. */
 @media (max-width: 1179px) {
   .kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Three cards on the first line, two wider ones on the second. */
+  .kpi-grid--5 {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .kpi-grid--5 > * {
+    grid-column: span 2;
+  }
+
+  .kpi-grid--5 > :nth-child(n + 4) {
+    grid-column: span 3;
   }
 }
 

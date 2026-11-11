@@ -9,6 +9,7 @@ Status of the build plan in [SPEC.md](SPEC.md) §8. Read this first when resumin
 | 1. Scaffold + repo files       | `33a47d4`             | Electron + Vite + React + TS, title bar, sidebar, page shells, repo files, CI |
 | 2. Parser, subagents, database | `09c4ceb`             | Recursive scan, dedup, subagents, SQLite history, incremental reads           |
 | 3. IPC API + Overview          | `380bda0` + follow-up | `getOverview`, KPI cards, daily chart, shortcut cards, cost estimate          |
+| 4. Projects page               | not committed yet     | `getProjects`, `getProjectDetail`, sortable `DataTable`, analysis panel       |
 
 CI (lint, typecheck, tests on macOS and Windows) is green up to `380bda0`.
 
@@ -48,23 +49,37 @@ CI (lint, typecheck, tests on macOS and Windows) is green up to `380bda0`.
 - The Machines shortcut card ignores the machine filter.
 - The streak counts back from today; when today has no usage yet, from yesterday.
 
+**Projects page**
+
+- `getProjects` returns `{ hasData, kpis, rows }` rather than the bare `ProjectRow[]` of SPEC §6, so the KPI row also comes from the main process.
+- Sessions per project: a session counts in every project where it has activity, from the derived table `session_projects` (one row per session and project, with the session's start day and its tokens in that project). So no project shows tokens with 0 sessions, and the column does not add up to the session total; its header tooltip says "Sessions with activity in this project". Tok/session = the project's tokens in those sessions / their count, subagents included.
+- Global session totals (Projects KPI, Overview, the future Sessions page) still count each session once, from `sessions`, whose `project` stays the one with the most tokens.
+- `startDayWhere` now applies the project filter too (sessions, session_projects and subagents have a project column).
+- "Last used" is the last day with usage of the project, whatever the selected period (the machine and other filters still apply). Out/In = output / total input; the panel's "output %" = output / all tokens.
+- Agent types in the panel are grouped by type and kind, so a warm-up never mixes with real invocations. `aside_question` shows as `/btw`, `unknown` as "Unknown type" (`src/lib/agents.ts`, ids in `shared/agents.ts`).
+- Layout: the panel sits next to the table from 1600 px (`2fr / minmax(460px, 1fr)`). Inside, the panel lays itself out with container queries (1, 2 or 3-zone grid), whatever its position.
+- Reusable pieces for later steps: `DataTable` (sort on header click, `aria-sort`, nulls last, optional row selection through a button in the first cell), `src/lib/sort.ts`, `MainSubagentBars` (Agents page), `HourBars` (Calendar), `HBars`, `SplitBar` (Machines), `ChartTooltip`, `formatRelativeDay`.
+
 **Database**
 
-- Schema version 3. Versions 2 and 3 empty the `files` table so the transcripts still on disk are read again to fill the new columns.
+- Schema version 4. Versions 2 and 3 empty the `files` table so the transcripts still on disk are read again to fill the new columns. Version 4 adds `session_projects` and rebuilds the derived tables from `messages` (checked on a real version-3 database).
+- Sync (step 10): the `sessions` rows of the sync format carry one project. To keep per-project session counts for other machines, they will also need the list of projects of each session (with tokens), or a `sessionProjects` array.
 
 ## Open points
 
 - The container flags are set only in the local dev database. A new database, such as the installed app's, needs them again: there is no Settings control until step 9.
-- There are no subagent transcripts on this PC: subagent handling is verified only on synthetic fixtures.
+- The first real subagent transcript on this PC (an Explore run, 2026-11-11) shows up in the Projects panel under TTfCC. Workflow, `/btw` and warm-up agents are still verified only on synthetic fixtures.
 - Not checked yet: the macOS title bar, and the Windows window buttons, which screenshots do not capture.
 - Prices must be verified before release.
 - File watching is not in yet (step 9): the app scans only at startup.
 
-## Step 4 starts here: Projects page
+## Step 5 starts here: Models page
 
-Spec: SPEC.md §5, Projects. Suggested effort: `high`.
+Spec: SPEC.md §5, Models. Suggested effort: `high`.
 
-1. Types in `shared/types.ts`, channels in `shared/ipc.ts`, then `preload.ts` and a `handle()` in `electron/main.ts`, following `getOverview`.
-2. `getProjects(filters)` and `getProjectDetail(project, filters)` in `electron/aggregate.ts`. Sources: `hourly` (tokens by day, hour, model, kind, agent type, machine), `sessions` (count and tokens per project, by `start_day`), `subagents`. Reuse `hourlyWhere` and `startDayWhere`, and validate input with `parseFilters`.
-3. UI in `src/pages/Projects.tsx`: KPI row, a sortable and searchable table (a reusable `DataTable` is needed, since every table must sort), and the analysis panel. The panel sits next to the table at 1600 px and wider. Reuse `KpiCard`, `useRangeFilters`, `useUsageQuery`, `src/lib/chart.ts` and `src/lib/format.ts`. All strings go in `src/i18n/en.ts`.
-4. Tests in `tests/aggregate.test.ts` against the fixtures. The fixture totals are listed at the top of `tests/scanner.test.ts`.
+1. Same path as `getProjects`: types in `shared/types.ts`, a channel in `shared/ipc.ts`, `preload.ts`, a `handle()` in `electron/main.ts` with an `empty*` fallback.
+2. `getModels(filters)` in `electron/aggregate.ts`: one card per model from `hourly` (`MODEL_TOTALS`, `costOfModels` per model, subagent share = `kind <> 'main'`, top project), the weekly share over the last 12 weeks (weeks start Monday), and the token types per model.
+3. UI in `src/pages/Models.tsx`. Reuse `KpiCard`, `HBars`, `ChartTooltip`, `AXIS_TICK` / `BAR_CURSOR` from `src/lib/chart.ts`, and the multi-series colors `--accent`, `--accent-light`, `--accent-dark`, `--accent-pale` (they differ in lightness).
+4. Tests in `tests/aggregate.test.ts`: the models add up to the Overview total (fixture: Opus 5.5 29175, Haiku 5.5 25549; see the top of `tests/scanner.test.ts`).
+
+Run tests from PowerShell: under Git Bash, vitest loads twice (drive letter case) and fails with "failed to find the current suite". Bash heredocs that contain quotes also fail in this shell: write files with the editor tools instead.

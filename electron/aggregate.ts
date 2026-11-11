@@ -7,10 +7,15 @@ import type {
   AgentKind,
   DailyPoint,
   Filters,
+  MainSubagentPoint,
   Overview,
   OverviewShortcuts,
   PeriodChange,
   Pricing,
+  ProjectAgentType,
+  ProjectDetail,
+  ProjectRow,
+  Projects,
 } from '../shared/types';
 import type { UsageDatabase } from './db';
 import { costOf } from './pricing';
@@ -90,22 +95,54 @@ function inList(column: string, values: readonly string[] | undefined, where: Wh
   where.params.push(...values);
 }
 
-/** Condition on the `hourly` table for a set of filters. */
-function hourlyWhere(filters: Filters): Where {
-  const where: Where = { sql: 'local_day BETWEEN ? AND ?', params: [filters.from, filters.to] };
-  inList('machine_id', filters.machineIds, where);
-  inList('project', filters.projects, where);
-  inList('model', filters.models, where);
-  inList('agent_type', filters.agentTypes, where);
-  inList('kind', filters.kinds, where);
+/**
+ * Condition on the `hourly` table for a set of filters. `alias` prefixes the columns when
+ * the table is joined, for example `h`.
+ */
+function hourlyWhere(filters: Filters, alias?: string): Where {
+  const p = alias ? `${alias}.` : '';
+  const where: Where = {
+    sql: `${p}local_day BETWEEN ? AND ?`,
+    params: [filters.from, filters.to],
+  };
+  return withListFilters(filters, where, p);
+}
+
+/** Condition on the `hourly` table for every filter except the period. */
+function anyDayWhere(filters: Filters): Where {
+  return withListFilters(filters, { sql: '1', params: [] }, '');
+}
+
+/** Adds the machine, project, model, agent type and kind filters; `p` prefixes the columns. */
+function withListFilters(filters: Filters, where: Where, p: string): Where {
+  inList(`${p}machine_id`, filters.machineIds, where);
+  inList(`${p}project`, filters.projects, where);
+  inList(`${p}model`, filters.models, where);
+  inList(`${p}agent_type`, filters.agentTypes, where);
+  inList(`${p}kind`, filters.kinds, where);
   return where;
 }
 
-/** Condition on a table that only has a start day and a machine, such as `sessions`. */
+/**
+ * Condition on a table with one row per session or invocation, such as `sessions`: a row
+ * counts on its start day, and belongs to a single project.
+ */
 function startDayWhere(filters: Filters): Where {
   const where: Where = { sql: 'start_day BETWEEN ? AND ?', params: [filters.from, filters.to] };
   inList('machine_id', filters.machineIds, where);
+  inList('project', filters.projects, where);
   return where;
+}
+
+/** The longest project name a request may carry. */
+const MAX_NAME_LENGTH = 1_000;
+
+/** Checks a project name received over IPC. */
+export function parseProjectName(value: unknown): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_NAME_LENGTH) {
+    throw new InvalidRequestError('project must be a non-empty string');
+  }
+  return value;
 }
 
 function ratio(part: number, whole: number): number {
@@ -126,6 +163,72 @@ interface ModelTotals {
   cache_write: number;
   cache_read: number;
   cache_write_1h: number;
+}
+
+const MODEL_TOTALS = `model, SUM(input) AS input, SUM(output) AS output,
+  SUM(cache_write) AS cache_write, SUM(cache_read) AS cache_read,
+  SUM(cache_write_1h) AS cache_write_1h`;
+
+/**
+ * The estimated cost of per-model totals. Prices are per model, so the cost is summed
+ * model by model. `cost` is null when no model with usage has a price.
+ */
+function costOfModels(
+  pricing: Pricing,
+  models: readonly ModelTotals[],
+): { cost: number | null; costIsPartial: boolean } {
+  let cost = 0;
+  let priced = 0;
+  let unpriced = 0;
+  for (const row of models) {
+    if (row.input + row.output + row.cache_write + row.cache_read === 0) continue;
+    const modelCost = costOf(pricing, row.model, {
+      input: row.input,
+      output: row.output,
+      cacheWrite: row.cache_write,
+      cacheRead: row.cache_read,
+      cacheWrite1h: row.cache_write_1h,
+    });
+    if (modelCost === null) {
+      unpriced++;
+    } else {
+      priced++;
+      cost += modelCost;
+    }
+  }
+  return { cost: priced > 0 ? cost : null, costIsPartial: priced > 0 && unpriced > 0 };
+}
+
+/** The item with the most tokens; ties go to the first name in alphabetical order. */
+function largest<T extends { name: string; tokens: number }>(items: readonly T[]): T | undefined {
+  let best: T | undefined;
+  for (const item of items) {
+    if (
+      !best ||
+      item.tokens > best.tokens ||
+      (item.tokens === best.tokens && item.name < best.name)
+    ) {
+      best = item;
+    }
+  }
+  return best;
+}
+
+/** Sorts largest first, ties by name, so every list comes back in a stable order. */
+function byTokens(a: { name: string; tokens: number }, b: { name: string; tokens: number }) {
+  return b.tokens - a.tokens || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+}
+
+/** True when the database holds any usage for the selected machines, whatever the period. */
+function hasAnyUsage(db: UsageDatabase, machineIds?: string[]): boolean {
+  const where: Where = { sql: '1', params: [] };
+  inList('machine_id', machineIds, where);
+  return (
+    db.raw
+      .prepare(`SELECT 1 FROM hourly WHERE ${where.sql} LIMIT 1`)
+      .pluck()
+      .get(...where.params) !== undefined
+  );
 }
 
 /**
@@ -171,19 +274,11 @@ export function getOverview(
 
   // Totals per model: they give the KPI cards, the cost and the main model.
   const models = raw
-    .prepare(
-      `SELECT model, SUM(input) AS input, SUM(output) AS output,
-              SUM(cache_write) AS cache_write, SUM(cache_read) AS cache_read,
-              SUM(cache_write_1h) AS cache_write_1h
-       FROM hourly WHERE ${where.sql} GROUP BY model`,
-    )
+    .prepare(`SELECT ${MODEL_TOTALS} FROM hourly WHERE ${where.sql} GROUP BY model`)
     .all(...where.params) as ModelTotals[];
 
   let inputTokens = 0;
   let outputTokens = 0;
-  let cost = 0;
-  let pricedModels = 0;
-  let unpricedModels = 0;
   let mainModel: OverviewShortcuts['model'] = null;
   let mainModelTokens = -1;
   for (const row of models) {
@@ -192,20 +287,6 @@ export function getOverview(
     if (total === 0) continue;
     inputTokens += input;
     outputTokens += row.output;
-
-    const modelCost = costOf(pricing, row.model, {
-      input: row.input,
-      output: row.output,
-      cacheWrite: row.cache_write,
-      cacheRead: row.cache_read,
-      cacheWrite1h: row.cache_write_1h,
-    });
-    if (modelCost === null) {
-      unpricedModels++;
-    } else {
-      pricedModels++;
-      cost += modelCost;
-    }
 
     if (total > mainModelTokens || (total === mainModelTokens && row.model < mainModel!.name)) {
       mainModelTokens = total;
@@ -267,23 +348,14 @@ export function getOverview(
     .all(filters.from, filters.to) as { id: string; name: string; tokens: number }[];
   const allMachinesTokens = machineRows.reduce((sum, row) => sum + row.tokens, 0);
 
-  const anyUsage: Where = { sql: '1', params: [] };
-  inList('machine_id', filters.machineIds, anyUsage);
-  const hasData =
-    raw
-      .prepare(`SELECT 1 FROM hourly WHERE ${anyUsage.sql} LIMIT 1`)
-      .pluck()
-      .get(...anyUsage.params) !== undefined;
-
   return {
-    hasData,
+    hasData: hasAnyUsage(db, filters.machineIds),
     kpis: {
       totalTokens,
       inputTokens,
       outputTokens,
       totalChange: comparePeriods(totalTokens, previousTotal),
-      cost: pricedModels > 0 ? cost : null,
-      costIsPartial: pricedModels > 0 && unpricedModels > 0,
+      ...costOfModels(pricing, models),
     },
     daily,
     shortcuts: {
@@ -337,5 +409,263 @@ export function emptyOverview(filters: Filters): Overview {
       subagents: { share: 0, invocations: 0 },
       machines: [],
     },
+  };
+}
+
+// ── Projects ──────────────────────────────────────────────────────────────────
+
+interface ProjectTotals {
+  name: string;
+  tokens: number;
+  input: number;
+  output: number;
+  subagent: number;
+  active_days: number;
+}
+
+/**
+ * Sessions with activity in a project, counted on their start day like every session
+ * count. A session that worked in two projects counts in both.
+ */
+function sessionsPerProject(
+  db: UsageDatabase,
+  filters: Filters,
+): Map<string, { count: number; tokens: number }> {
+  const started = startDayWhere(filters);
+  const rows = db.raw
+    .prepare(
+      `SELECT project, COUNT(*) AS count, SUM(tokens) AS tokens
+       FROM session_projects WHERE ${started.sql} GROUP BY project`,
+    )
+    .all(...started.params) as { project: string; count: number; tokens: number }[];
+  return new Map(rows.map((row) => [row.project, row]));
+}
+
+/** The Projects page: KPI row and the table of every project used in the period. */
+export function getProjects(db: UsageDatabase, filters: Filters): Projects {
+  const where = hourlyWhere(filters);
+  const raw = db.raw;
+
+  const totals = raw
+    .prepare(
+      `SELECT project AS name, SUM(${TOKENS}) AS tokens, SUM(${INPUT_TOKENS}) AS input,
+              SUM(output) AS output,
+              SUM(CASE WHEN kind <> 'main' THEN ${TOKENS} ELSE 0 END) AS subagent,
+              COUNT(DISTINCT CASE WHEN ${TOKENS} > 0 THEN local_day END) AS active_days
+       FROM hourly WHERE ${where.sql} GROUP BY project HAVING tokens > 0`,
+    )
+    .all(...where.params) as ProjectTotals[];
+  totals.sort(byTokens);
+
+  // The last day with usage, whatever the period.
+  const anyDay = anyDayWhere(filters);
+  const lastUsed = new Map(
+    (
+      raw
+        .prepare(
+          `SELECT project, MAX(local_day) AS day FROM hourly
+           WHERE ${anyDay.sql} AND ${TOKENS} > 0 GROUP BY project`,
+        )
+        .all(...anyDay.params) as { project: string; day: string }[]
+    ).map((row) => [row.project, row.day]),
+  );
+
+  const modelsByProject = new Map<string, { name: string; tokens: number }[]>();
+  const modelRows = raw
+    .prepare(
+      `SELECT project, model AS name, SUM(${TOKENS}) AS tokens
+       FROM hourly WHERE ${where.sql} GROUP BY project, model HAVING tokens > 0`,
+    )
+    .all(...where.params) as { project: string; name: string; tokens: number }[];
+  for (const row of modelRows) {
+    const list = modelsByProject.get(row.project) ?? [];
+    list.push(row);
+    modelsByProject.set(row.project, list);
+  }
+
+  const sessionsByProject = sessionsPerProject(db, filters);
+  // The KPI counts each session once.
+  const started = startDayWhere(filters);
+  const allSessions = raw
+    .prepare(
+      `SELECT COUNT(*) AS count, COALESCE(SUM(${TOKENS}), 0) AS tokens
+       FROM sessions WHERE ${started.sql}`,
+    )
+    .get(...started.params) as { count: number; tokens: number };
+
+  const totalTokens = totals.reduce((sum, row) => sum + row.tokens, 0);
+  const totalInput = totals.reduce((sum, row) => sum + row.input, 0);
+  const totalOutput = totals.reduce((sum, row) => sum + row.output, 0);
+  const top3Tokens = totals.slice(0, 3).reduce((sum, row) => sum + row.tokens, 0);
+
+  const rows: ProjectRow[] = totals.map((row) => {
+    const sessions = sessionsByProject.get(row.name);
+    return {
+      name: row.name,
+      tokens: row.tokens,
+      share: ratio(row.tokens, totalTokens),
+      input: row.input,
+      output: row.output,
+      outputInputRatio: ratio(row.output, row.input),
+      subagentShare: ratio(row.subagent, row.tokens),
+      sessions: sessions?.count ?? 0,
+      tokensPerSession: sessions && sessions.count > 0 ? sessions.tokens / sessions.count : null,
+      activeDays: row.active_days,
+      mainModel: largest(modelsByProject.get(row.name) ?? [])?.name ?? '',
+      lastUsed: lastUsed.get(row.name) ?? '',
+    };
+  });
+
+  const main = rows[0];
+  return {
+    hasData: hasAnyUsage(db, filters.machineIds),
+    kpis: {
+      activeProjects: rows.length,
+      mainProject: main ? { name: main.name, share: main.share } : null,
+      tokensPerSession: allSessions.count > 0 ? allSessions.tokens / allSessions.count : null,
+      outputInputRatio: ratio(totalOutput, totalInput),
+      top3Share: ratio(top3Tokens, totalTokens),
+    },
+    rows,
+  };
+}
+
+/** What the Projects page shows when there is no database to read. */
+export function emptyProjects(): Projects {
+  return {
+    hasData: false,
+    kpis: {
+      activeProjects: 0,
+      mainProject: null,
+      tokensPerSession: null,
+      outputInputRatio: 0,
+      top3Share: 0,
+    },
+    rows: [],
+  };
+}
+
+type SubagentKind = ProjectAgentType['kind'];
+
+/** The analysis panel of one project over the period. */
+export function getProjectDetail(
+  db: UsageDatabase,
+  pricing: Pricing,
+  project: string,
+  filters: Filters,
+): ProjectDetail {
+  const scoped: Filters = { ...filters, projects: [project] };
+  const where = hourlyWhere(scoped);
+  const raw = db.raw;
+
+  const models = raw
+    .prepare(`SELECT ${MODEL_TOTALS} FROM hourly WHERE ${where.sql} GROUP BY model`)
+    .all(...where.params) as ModelTotals[];
+  const modelTokens = models
+    .map((row) => ({
+      name: row.model,
+      tokens: row.input + row.output + row.cache_write + row.cache_read,
+    }))
+    .filter((row) => row.tokens > 0)
+    .sort(byTokens);
+  const tokens = modelTokens.reduce((sum, row) => sum + row.tokens, 0);
+  const output = models.reduce((sum, row) => sum + row.output, 0);
+
+  const dailyRows = raw
+    .prepare(
+      `SELECT local_day AS day,
+              SUM(CASE WHEN kind = 'main' THEN ${TOKENS} ELSE 0 END) AS main,
+              SUM(CASE WHEN kind <> 'main' THEN ${TOKENS} ELSE 0 END) AS subagent
+       FROM hourly WHERE ${where.sql} GROUP BY local_day`,
+    )
+    .all(...where.params) as MainSubagentPoint[];
+  const byDay = new Map(dailyRows.map((row) => [row.day, row]));
+  const daily = eachDay(filters.from, filters.to).map(
+    (day) => byDay.get(day) ?? { day, main: 0, subagent: 0 },
+  );
+  const subagentTokens = dailyRows.reduce((sum, row) => sum + row.subagent, 0);
+
+  const joined = hourlyWhere(scoped, 'h');
+  const machines = raw
+    .prepare(
+      `SELECT h.machine_id AS id, COALESCE(m.name, h.machine_id) AS name, SUM(${TOKENS}) AS tokens
+       FROM hourly h LEFT JOIN machines m ON m.id = h.machine_id
+       WHERE ${joined.sql} GROUP BY h.machine_id HAVING tokens > 0`,
+    )
+    .all(...joined.params) as { id: string; name: string; tokens: number }[];
+  machines.sort(byTokens);
+
+  // Tokens come from `hourly`, which follows every filter; invocations from `subagents`.
+  const typeRows = raw
+    .prepare(
+      `SELECT agent_type AS name, kind, SUM(${TOKENS}) AS tokens
+       FROM hourly WHERE ${where.sql} AND kind <> 'main'
+       GROUP BY agent_type, kind HAVING tokens > 0`,
+    )
+    .all(...where.params) as { name: string; kind: SubagentKind; tokens: number }[];
+  typeRows.sort(byTokens);
+  const started = startDayWhere(scoped);
+  const invocationRows = raw
+    .prepare(
+      `SELECT agent_type AS name, kind, COUNT(*) AS count
+       FROM subagents WHERE ${started.sql} AND kind <> 'warmup'
+       GROUP BY agent_type, kind`,
+    )
+    .all(...started.params) as { name: string; kind: SubagentKind; count: number }[];
+  const typeKey = (row: { name: string; kind: SubagentKind }) => `${row.kind}:${row.name}`;
+  const invocations = new Map(invocationRows.map((row) => [typeKey(row), row.count]));
+
+  const hourRows = raw
+    .prepare(
+      `SELECT local_hour AS hour, SUM(${TOKENS}) AS tokens
+       FROM hourly WHERE ${where.sql} GROUP BY local_hour`,
+    )
+    .all(...where.params) as { hour: number; tokens: number }[];
+  const hours = Array.from({ length: 24 }, () => 0);
+  for (const row of hourRows) {
+    if (row.hour >= 0 && row.hour < 24) hours[row.hour] = row.tokens;
+  }
+
+  // Like the table: every session with activity in the project.
+  const sessions = sessionsPerProject(db, scoped).get(project)?.count ?? 0;
+
+  return {
+    name: project,
+    summary: {
+      tokens,
+      sessions,
+      outputShare: ratio(output, tokens),
+      subagentShare: ratio(subagentTokens, tokens),
+      ...costOfModels(pricing, models),
+    },
+    daily,
+    models: modelTokens.map((row) => ({ ...row, share: ratio(row.tokens, tokens) })),
+    machines: machines.map((row) => ({ ...row, share: ratio(row.tokens, tokens) })),
+    agentTypes: typeRows.map((row) => ({
+      ...row,
+      share: ratio(row.tokens, subagentTokens),
+      invocations: invocations.get(typeKey(row)) ?? 0,
+    })),
+    hours,
+  };
+}
+
+/** What the analysis panel shows when there is no database to read. */
+export function emptyProjectDetail(project: string, filters: Filters): ProjectDetail {
+  return {
+    name: project,
+    summary: {
+      tokens: 0,
+      sessions: 0,
+      outputShare: 0,
+      subagentShare: 0,
+      cost: null,
+      costIsPartial: false,
+    },
+    daily: eachDay(filters.from, filters.to).map((day) => ({ day, main: 0, subagent: 0 })),
+    models: [],
+    machines: [],
+    agentTypes: [],
+    hours: Array.from({ length: 24 }, () => 0),
   };
 }

@@ -3,9 +3,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   comparePeriods,
   emptyOverview,
+  emptyProjectDetail,
+  emptyProjects,
   getOverview,
+  getProjectDetail,
+  getProjects,
   InvalidRequestError,
   parseFilters,
+  parseProjectName,
 } from '../electron/aggregate';
 import type { UsageDatabase } from '../electron/db';
 import { scanLogs } from '../electron/scanner';
@@ -267,5 +272,195 @@ describe('parseFilters', () => {
     ['an unknown kind', { from: '2026-11-10', to: '2026-11-10', kinds: ['secret'] }],
   ])('rejects %s', (_name, input) => {
     expect(() => parseFilters(input)).toThrow(InvalidRequestError);
+  });
+});
+
+describe('getProjects', () => {
+  it('lists every project of the period, largest first', async () => {
+    const db = await fixtureDb();
+    const { hasData, rows } = getProjects(db, BOTH_DAYS);
+
+    expect(hasData).toBe(true);
+    expect(rows.map((row) => [row.name, row.tokens])).toEqual([
+      ['demo-app', 64024],
+      ['other-tool', 1010],
+      ['scratch-pad', 100],
+    ]);
+    // The projects add up to the Overview total.
+    const overview = getOverview(db, PRICING, BOTH_DAYS, EVENING);
+    expect(rows.reduce((sum, row) => sum + row.tokens, 0)).toBe(overview.kpis.totalTokens);
+    expect(rows.reduce((sum, row) => sum + row.share, 0)).toBeCloseTo(1, 10);
+    for (const row of rows) expect(row.input + row.output).toBe(row.tokens);
+  });
+
+  it('fills the columns of a project', async () => {
+    const db = await fixtureDb();
+    const demo = getProjects(db, BOTH_DAYS).rows[0]!;
+
+    expect(demo).toMatchObject({
+      name: 'demo-app',
+      share: 64024 / 65134,
+      input: 63563,
+      output: 461,
+      outputInputRatio: 461 / 63563,
+      sessions: 2,
+      // Session totals include their subagents: 60349 + 3675.
+      tokensPerSession: 64024 / 2,
+      activeDays: 2,
+      mainModel: 'Opus 5.5',
+      lastUsed: '2026-11-10',
+    });
+    // Every token outside the two main sessions comes from a subagent.
+    expect(demo.subagentShare).toBeCloseTo((64024 - 15455 - 2250) / 64024, 10);
+  });
+
+  it('counts a session in every project where it has activity', async () => {
+    const db = await fixtureDb();
+    const { rows, kpis } = getProjects(db, BOTH_DAYS);
+    const byName = new Map(rows.map((row) => [row.name, row]));
+
+    // Session 3333 spends 1010 tokens in other-tool and 100 in scratch-pad.
+    expect(byName.get('other-tool')).toMatchObject({ sessions: 1, tokensPerSession: 1010 });
+    expect(byName.get('scratch-pad')).toMatchObject({ sessions: 1, tokensPerSession: 100 });
+    for (const row of rows) expect(row.sessions).toBeGreaterThan(0);
+    expect(getProjectDetail(db, PRICING, 'scratch-pad', BOTH_DAYS).summary.sessions).toBe(1);
+
+    // Global totals still count each session once.
+    expect(rows.reduce((sum, row) => sum + row.sessions, 0)).toBe(4);
+    expect(kpis.tokensPerSession).toBe(65134 / 3);
+    expect(getOverview(db, PRICING, BOTH_DAYS, EVENING).shortcuts.sessions.count).toBe(3);
+  });
+
+  it('shows the last day of use, whatever the period', async () => {
+    const db = await fixtureDb();
+    const firstDay = getProjects(db, { from: '2026-11-09', to: '2026-11-09' });
+    expect(firstDay.rows.map((row) => [row.name, row.lastUsed])).toEqual([
+      ['demo-app', '2026-11-10'],
+    ]);
+  });
+
+  it('computes the KPI row', async () => {
+    const db = await fixtureDb();
+    const { kpis } = getProjects(db, BOTH_DAYS);
+
+    expect(kpis).toEqual({
+      activeProjects: 3,
+      mainProject: { name: 'demo-app', share: 64024 / 65134 },
+      tokensPerSession: 65134 / 3,
+      outputInputRatio: 497 / (959 + 14400 + 49278),
+      top3Share: 1,
+    });
+
+    const oneDay = getProjects(db, { from: '2026-11-09', to: '2026-11-09' });
+    expect(oneDay.kpis).toMatchObject({
+      activeProjects: 1,
+      mainProject: { name: 'demo-app', share: 1 },
+      tokensPerSession: 3675,
+    });
+  });
+
+  it('follows the machine filter', async () => {
+    const db = await fixtureDb();
+    const other = getProjects(db, { ...BOTH_DAYS, machineIds: ['another-machine'] });
+    expect(other).toEqual(emptyProjects());
+
+    const local = getProjects(db, { ...BOTH_DAYS, machineIds: [db.machineId] });
+    expect(local.rows).toHaveLength(3);
+  });
+
+  it('reports a quiet period as an empty table, with the data flag still set', async () => {
+    const db = await fixtureDb();
+    const quiet = getProjects(db, { from: '2026-01-01', to: '2026-01-07' });
+    expect(quiet).toEqual({ ...emptyProjects(), hasData: true });
+  });
+});
+
+describe('getProjectDetail', () => {
+  it('summarises the project and prices it like the Overview', async () => {
+    const db = await fixtureDb();
+    const detail = getProjectDetail(db, PRICING, 'demo-app', BOTH_DAYS);
+    const overview = getOverview(db, PRICING, { ...BOTH_DAYS, projects: ['demo-app'] }, EVENING);
+
+    expect(detail.name).toBe('demo-app');
+    expect(detail.summary).toEqual({
+      tokens: 64024,
+      sessions: 2,
+      outputShare: overview.kpis.outputTokens / 64024,
+      subagentShare: (64024 - 15455 - 2250) / 64024,
+      cost: overview.kpis.cost,
+      costIsPartial: false,
+    });
+    expect(detail.summary.cost).toBeGreaterThan(0);
+  });
+
+  it('splits the days between main sessions and subagents', async () => {
+    const db = await fixtureDb();
+    const { daily } = getProjectDetail(db, PRICING, 'demo-app', {
+      from: '2026-11-08',
+      to: '2026-11-10',
+    });
+    expect(daily).toEqual([
+      { day: '2026-11-08', main: 0, subagent: 0 },
+      { day: '2026-11-09', main: 2250, subagent: 1225 + 200 },
+      { day: '2026-11-10', main: 15455, subagent: 44894 },
+    ]);
+  });
+
+  it('breaks the project down by model, machine, agent type and hour', async () => {
+    const db = await fixtureDb();
+    const detail = getProjectDetail(db, PRICING, 'demo-app', BOTH_DAYS);
+
+    expect(detail.models.map((row) => [row.name, row.tokens])).toEqual([
+      ['Opus 5.5', 29175],
+      ['Haiku 5.5', 25549],
+      ['Sonnet 5.5', 9300],
+    ]);
+    expect(detail.models.reduce((sum, row) => sum + row.share, 0)).toBeCloseTo(1, 10);
+
+    expect(detail.machines).toEqual([
+      { id: db.machineId, name: 'test-machine', tokens: 64024, share: 1 },
+    ]);
+
+    expect(
+      detail.agentTypes.map((row) => [row.name, row.kind, row.tokens, row.invocations]),
+    ).toEqual([
+      ['Explore', 'task', 21540, 1],
+      ['aside_question', 'aside', 12040, 1],
+      // The agent without meta, the legacy agent and the inline bucket.
+      ['unknown', 'task', 3035 + 1225 + 200, 3],
+      ['build-check', 'workflow', 4270, 1],
+      // A warm-up is never an invocation.
+      ['general-purpose', 'warmup', 4009, 0],
+    ]);
+    expect(detail.agentTypes.reduce((sum, row) => sum + row.share, 0)).toBeCloseTo(1, 10);
+
+    expect(detail.hours).toHaveLength(24);
+    expect(detail.hours[9]).toBe(3675);
+    expect(detail.hours[12]).toBe(60349);
+    expect(detail.hours.reduce((sum, value) => sum + value, 0)).toBe(64024);
+  });
+
+  it('describes a project without usage in the period', async () => {
+    const db = await fixtureDb();
+    const filters = { from: '2026-01-01', to: '2026-01-03' };
+    expect(getProjectDetail(db, PRICING, 'demo-app', filters)).toEqual(
+      emptyProjectDetail('demo-app', filters),
+    );
+    expect(getProjectDetail(db, PRICING, 'no-such-project', BOTH_DAYS).summary.tokens).toBe(0);
+  });
+});
+
+describe('parseProjectName', () => {
+  it('accepts a project name', () => {
+    expect(parseProjectName('demo-app')).toBe('demo-app');
+  });
+
+  it.each([
+    ['a number', 1],
+    ['an empty string', ''],
+    ['a list', ['demo-app']],
+    ['a very long string', 'x'.repeat(1_001)],
+  ])('rejects %s', (_name, input) => {
+    expect(() => parseProjectName(input)).toThrow(InvalidRequestError);
   });
 });

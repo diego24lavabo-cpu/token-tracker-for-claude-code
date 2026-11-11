@@ -11,6 +11,12 @@ export const CHART_COLORS = {
   grid: '#2a2925',
 } as const;
 
+/** Axis labels: small, muted, in the mono face like every number. */
+export const AXIS_TICK = { fill: CHART_COLORS.axis, fontSize: 11, fontFamily: 'var(--font-mono)' };
+
+/** The faint band behind the hovered bar. */
+export const BAR_CURSOR = { fill: 'rgba(240, 238, 230, 0.05)' };
+
 const NICE_STEPS = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
 
 /** The smallest "round" number at or above `value`, for the top of an axis. */

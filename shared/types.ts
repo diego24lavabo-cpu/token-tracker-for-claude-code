@@ -131,6 +131,100 @@ export interface Overview {
   shortcuts: OverviewShortcuts;
 }
 
+// ── Projects ──────────────────────────────────────────────────────────────────
+
+/** One project of the period, as a row of the projects table. */
+export interface ProjectRow {
+  name: string;
+  /** All token types. */
+  tokens: number;
+  /** Part of all the period's tokens. */
+  share: number;
+  /** Total input: input + cache write + cache read. */
+  input: number;
+  output: number;
+  /** Output / total input. */
+  outputInputRatio: number;
+  /** Part of the project's tokens used by subagents. */
+  subagentShare: number;
+  /**
+   * Sessions that started in the period and have activity in this project. A session that
+   * worked in several projects counts in each, so these do not add up to the session total.
+   */
+  sessions: number;
+  /** This project's tokens per such session, subagents included. Null without sessions. */
+  tokensPerSession: number | null;
+  activeDays: number;
+  /** The model with the most tokens in this project. */
+  mainModel: string;
+  /** The last local day with usage, whatever the period, `YYYY-MM-DD`. */
+  lastUsed: string;
+}
+
+export interface ProjectsKpis {
+  activeProjects: number;
+  /** The project with the most tokens. Null when there is no usage. */
+  mainProject: { name: string; share: number } | null;
+  /** Average size of the period's sessions, each counted once. Null without sessions. */
+  tokensPerSession: number | null;
+  /** Output / total input. */
+  outputInputRatio: number;
+  /** Part of all tokens used by the three largest projects. */
+  top3Share: number;
+}
+
+export interface Projects {
+  /** False when the database holds no usage at all, for the selected machines. */
+  hasData: boolean;
+  kpis: ProjectsKpis;
+  /** Largest first. */
+  rows: ProjectRow[];
+}
+
+/** Tokens of one local day, split between the main sessions and their subagents. */
+export interface MainSubagentPoint {
+  day: string;
+  main: number;
+  subagent: number;
+}
+
+/** A labeled part of a whole. */
+export interface ShareItem {
+  name: string;
+  tokens: number;
+  share: number;
+}
+
+export interface ProjectAgentType extends ShareItem {
+  kind: Exclude<AgentKind, 'main'>;
+  /** Warm-ups are never invocations. */
+  invocations: number;
+}
+
+export interface ProjectDetail {
+  name: string;
+  summary: {
+    tokens: number;
+    /** Sessions with activity in this project, as in `ProjectRow.sessions`. */
+    sessions: number;
+    /** Output / all tokens. */
+    outputShare: number;
+    subagentShare: number;
+    cost: number | null;
+    costIsPartial: boolean;
+  };
+  /** One point per day of the period, zeros included. */
+  daily: MainSubagentPoint[];
+  /** Largest first. `share` is the part of the project's tokens. */
+  models: ShareItem[];
+  /** Largest first. `name` is the machine's name. */
+  machines: (ShareItem & { id: string })[];
+  /** Largest first. `share` is the part of the project's subagent tokens. */
+  agentTypes: ProjectAgentType[];
+  /** 24 values: tokens per local hour of the day, 0 to 23. */
+  hours: number[];
+}
+
 /** The API exposed to the renderer as `window.api` by the preload script. */
 export interface Api {
   /** Available synchronously so the title bar can lay out on first paint. */
@@ -138,6 +232,8 @@ export interface Api {
   getAppInfo(): Promise<AppInfo>;
   getMachines(): Promise<Machine[]>;
   getOverview(filters: Filters): Promise<Overview>;
+  getProjects(filters: Filters): Promise<Projects>;
+  getProjectDetail(project: string, filters: Filters): Promise<ProjectDetail>;
   /** Subscribes to "usage data changed" events. Returns an unsubscribe function. */
   onUsageUpdated(callback: () => void): () => void;
 }

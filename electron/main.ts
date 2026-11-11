@@ -4,8 +4,25 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { IPC } from '../shared/ipc';
-import type { AppInfo, Machine, Overview, Platform, Pricing } from '../shared/types';
-import { emptyOverview, getOverview, parseFilters } from './aggregate';
+import type {
+  AppInfo,
+  Machine,
+  Overview,
+  Platform,
+  Pricing,
+  ProjectDetail,
+  Projects,
+} from '../shared/types';
+import {
+  emptyOverview,
+  emptyProjectDetail,
+  emptyProjects,
+  getOverview,
+  getProjectDetail,
+  getProjects,
+  parseFilters,
+  parseProjectName,
+} from './aggregate';
 import { UsageDatabase } from './db';
 import { installAppMenu } from './menu';
 import { defaultLogRoot, existingLogRoots, tildify } from './paths';
@@ -187,6 +204,19 @@ function registerIpc(): void {
   handle<Overview>(IPC.getOverview, (_event, input) => {
     const filters = parseFilters(input);
     return database ? getOverview(database, pricing, filters) : emptyOverview(filters);
+  });
+
+  handle<Projects>(IPC.getProjects, (_event, input) => {
+    const filters = parseFilters(input);
+    return database ? getProjects(database, filters) : emptyProjects();
+  });
+
+  handle<ProjectDetail>(IPC.getProjectDetail, (_event, projectInput, filtersInput) => {
+    const project = parseProjectName(projectInput);
+    const filters = parseFilters(filtersInput);
+    return database
+      ? getProjectDetail(database, pricing, project, filters)
+      : emptyProjectDetail(project, filters);
   });
 }
 

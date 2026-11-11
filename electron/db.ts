@@ -6,9 +6,9 @@
  *
  * - `messages` is the source of truth: one row per deduplicated assistant response of
  *   this machine, with its UTC timestamp.
- * - `hourly`, `sessions` and `subagents` are derived from `messages` and can be rebuilt
- *   at any time. They carry a machine id because they will also hold the aggregates
- *   synced from other machines.
+ * - `hourly`, `sessions`, `session_projects` and `subagents` are derived from `messages`
+ *   and can be rebuilt at any time. They carry a machine id because they will also hold
+ *   the aggregates synced from other machines.
  * - `agent_meta` keeps what only the subagent meta files know (agent type, description).
  */
 import Database from 'better-sqlite3';
@@ -179,6 +179,26 @@ export const MIGRATIONS: ReadonlyArray<(db: Sqlite) => void> = [
     db.exec(`
       ALTER TABLE messages ADD COLUMN subfolder TEXT NOT NULL DEFAULT '';
       DELETE FROM files;
+    `);
+  },
+  // Adds the projects each session worked in. 'sessions' keeps one project per session
+  // (the one with the most tokens) so that global counts see each session once; this table
+  // lets a project count every session that has activity in it.
+  (db) => {
+    db.exec(`
+      CREATE TABLE session_projects (
+        machine_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        project    TEXT NOT NULL,
+        -- The session's start day, as in 'sessions'.
+        start_day  TEXT NOT NULL,
+        -- Tokens of the session in this project, subagents included.
+        tokens     INTEGER NOT NULL,
+        PRIMARY KEY (machine_id, session_id, project)
+      ) WITHOUT ROWID;
+      CREATE INDEX session_projects_start ON session_projects (start_day);
+      INSERT INTO settings (key, value) VALUES ('derived_dirty', '1')
+        ON CONFLICT (key) DO UPDATE SET value = '1';
     `);
   },
 ];
@@ -392,6 +412,21 @@ function refreshStatements(scope: Scope): string[] {
      JOIN first_message f ON f.session_id = a.session_id AND f.position = 1
      JOIN by_model m ON m.session_id = a.session_id AND m.position = 1
      JOIN by_project p ON p.session_id = a.session_id AND p.position = 1`,
+
+    // Needs the 'sessions' rows above, for the start day.
+    `DELETE FROM session_projects WHERE machine_id = @machine AND ${scope.sessions}`,
+    `INSERT INTO session_projects (machine_id, session_id, project, start_day, tokens)
+     WITH scoped AS (
+       SELECT ${SCOPED_COLUMNS} FROM messages WHERE ${scope.sessions}
+     ),
+     per_project AS (
+       SELECT session_id, project_name AS project, SUM(${TOKENS}) AS tokens
+       FROM scoped GROUP BY session_id, project_name
+     )
+     SELECT @machine, p.session_id, p.project, s.start_day, p.tokens
+     FROM per_project p
+     JOIN sessions s ON s.machine_id = @machine AND s.session_id = p.session_id
+     WHERE p.tokens > 0`,
   ];
 }
 
@@ -918,7 +953,7 @@ export class UsageDatabase {
   // ── Derived tables ──────────────────────────────────────────────────────────
 
   /**
-   * Brings `subagents`, `hourly` and `sessions` in line with `messages`. Only the rows
+   * Brings the derived tables in line with `messages`. Only the rows
    * affected since the last call are rebuilt, unless there are too many of them.
    */
   refreshDerived(): void {

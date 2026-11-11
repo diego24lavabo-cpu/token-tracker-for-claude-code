@@ -5,6 +5,7 @@ import {
   formatDuration,
   formatInt,
   formatPercent,
+  formatRelativeDay,
   formatTokens,
   formatTokensAxis,
   formatTokensK,
@@ -153,5 +154,23 @@ describe('formatDuration', () => {
   it('shows a dash for invalid durations', () => {
     expect(formatDuration(-1)).toBe('—');
     expect(formatDuration(Number.NaN)).toBe('—');
+  });
+});
+
+describe('formatRelativeDay', () => {
+  it('names the last few days relative to today', () => {
+    expect(formatRelativeDay('2026-11-10', '2026-11-10')).toBe('Today');
+    expect(formatRelativeDay('2026-11-09', '2026-11-10')).toBe('Yesterday');
+    expect(formatRelativeDay('2026-11-04', '2026-11-10')).toBe('6 days ago');
+  });
+
+  it('shows older days as dates, with the year when it differs', () => {
+    expect(formatRelativeDay('2026-11-03', '2026-11-10')).toBe('Nov 3');
+    expect(formatRelativeDay('2025-12-30', '2026-01-02')).toBe('3 days ago');
+    expect(formatRelativeDay('2025-12-20', '2026-01-02')).toBe('Dec 20, 2025');
+  });
+
+  it('shows a dash for a value that is not a day', () => {
+    expect(formatRelativeDay('', '2026-11-10')).toBe('—');
   });
 });

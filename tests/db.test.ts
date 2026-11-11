@@ -76,7 +76,10 @@ function store(db: UsageDatabase, messages: MessageInput[], agents: AgentInput[]
 }
 
 function dump(db: UsageDatabase, table: string): unknown[] {
-  return db.raw.prepare(`SELECT * FROM ${table} ORDER BY 1, 2, 3, 4, 5, 6, 7`).all();
+  // Sorted by the first columns (up to 7), which hold every table's primary key.
+  const columns = Math.min(7, (db.raw.pragma(`table_info(${table})`) as unknown[]).length);
+  const order = Array.from({ length: columns }, (_, index) => index + 1).join(', ');
+  return db.raw.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all();
 }
 
 describe('schema', () => {
@@ -93,6 +96,7 @@ describe('schema', () => {
       'hourly',
       'machines',
       'messages',
+      'session_projects',
       'sessions',
       'settings',
       'subagents',
@@ -636,7 +640,7 @@ describe('derived tables', () => {
       store(stepByStep, messages.slice(i, i + 25), agents);
     }
 
-    for (const table of ['hourly', 'sessions', 'subagents']) {
+    for (const table of ['hourly', 'sessions', 'session_projects', 'subagents']) {
       const strip = (rows: unknown[]) =>
         rows.map((row) => ({ ...(row as Record<string, unknown>), machine_id: '' }));
       expect(strip(dump(stepByStep, table))).toEqual(strip(dump(atOnce, table)));

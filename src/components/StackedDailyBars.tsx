@@ -1,10 +1,9 @@
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { DailyPoint } from '../../shared/types';
 import { en } from '../i18n/en';
-import { CHART_COLORS, niceCeil, tickIndexes } from '../lib/chart';
+import { AXIS_TICK, BAR_CURSOR, CHART_COLORS, niceCeil, tickIndexes } from '../lib/chart';
 import { formatDay, formatPercent, formatTokens, formatTokensAxis } from '../lib/format';
-
-const AXIS_TICK = { fill: CHART_COLORS.axis, fontSize: 11, fontFamily: 'var(--font-mono)' };
+import { ChartTooltip, TooltipRow } from './ChartTooltip';
 const X_LABELS = 6;
 
 interface StackedDailyBarsProps {
@@ -47,11 +46,7 @@ export function StackedDailyBars({ data, today }: StackedDailyBarsProps) {
             axisLine={false}
             width={52}
           />
-          <Tooltip
-            content={<DayTooltip />}
-            cursor={{ fill: 'rgba(240, 238, 230, 0.05)' }}
-            isAnimationActive={false}
-          />
+          <Tooltip content={<DayTooltip />} cursor={BAR_CURSOR} isAnimationActive={false} />
           <Bar
             dataKey="input"
             stackId="tokens"
@@ -84,8 +79,7 @@ function DayTooltip({ active, payload }: DayTooltipProps) {
   const total = point.input + point.output;
 
   return (
-    <div className="chart-tooltip">
-      <div className="chart-tooltip-title">{formatDay(point.day, { year: true })}</div>
+    <ChartTooltip title={formatDay(point.day, { year: true })}>
       <TooltipRow label={en.overview.daily.total} value={formatTokens(total)} strong />
       <TooltipRow
         label={en.overview.daily.input}
@@ -101,25 +95,6 @@ function DayTooltip({ active, payload }: DayTooltipProps) {
         label={en.overview.daily.subagents}
         value={total > 0 ? formatPercent(point.subagent / total) : formatPercent(0)}
       />
-    </div>
-  );
-}
-
-interface TooltipRowProps {
-  label: string;
-  value: string;
-  swatch?: 'input' | 'output';
-  strong?: boolean;
-}
-
-function TooltipRow({ label, value, swatch, strong }: TooltipRowProps) {
-  return (
-    <div className={strong ? 'chart-tooltip-row chart-tooltip-row--strong' : 'chart-tooltip-row'}>
-      <span className="chart-tooltip-label">
-        {swatch && <span className={`swatch swatch--${swatch}`} aria-hidden="true" />}
-        {label}
-      </span>
-      <span className="num">{value}</span>
-    </div>
+    </ChartTooltip>
   );
 }

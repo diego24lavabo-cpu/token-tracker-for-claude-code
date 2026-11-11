@@ -128,6 +128,105 @@ export const en = {
     },
   },
 
+  projects: {
+    kpi: {
+      active: 'Active projects',
+      activeHint: 'in the period',
+      main: 'Main project',
+      mainHint: (share: string) => `${share} of tokens`,
+      perSession: 'Tokens per session (avg.)',
+      perSessionHint: 'all projects',
+      ratio: 'Output / input ratio',
+      ratioHint: (read: string) => `1 token generated for ${read} read`,
+      top3: 'Top 3 projects',
+      top3Hint: 'of total usage',
+    },
+    table: {
+      title: 'All projects',
+      hint: 'Select a row to see its analysis',
+      label: 'All projects',
+      search: 'Search projects',
+      searchPlaceholder: 'Search…',
+      empty: 'No usage in this period',
+      noMatch: (query: string) => `No project matches “${query}”`,
+      project: 'Project',
+      tokens: 'Tokens · share',
+      input: 'Input',
+      output: 'Output',
+      outIn: 'Out/In',
+      subagents: 'Subagents',
+      sessions: 'Sessions',
+      sessionsHint: 'Sessions with activity in this project',
+      perSession: 'Tok/session',
+      activeDays: 'Active days',
+      mainModel: 'Main model',
+      lastUsed: 'Last used',
+    },
+    panel: {
+      title: 'Analysis',
+      label: (project: string) => `Analysis of ${project}`,
+      summary: {
+        tokens: (value: string) => `${value} tokens`,
+        sessions: (count: number, formatted: string) =>
+          count === 1 ? '1 session' : `${formatted} sessions`,
+        output: (share: string) => `output ${share}`,
+        subagents: (share: string) => `subagents ${share}`,
+        cost: (value: string) => `est. cost ${value}`,
+        costPartial: 'some models have no price set',
+      },
+      daily: 'Tokens per day',
+      dailyLabel: 'Tokens per day for this project, main sessions and subagents',
+      main: 'Main',
+      subagents: 'Subagents',
+      models: 'Models used',
+      modelsLabel: 'Share of each model in this project',
+      machines: 'By machine',
+      machinesLabel: 'Share of each machine in this project',
+      agentTypes: 'Top agent types',
+      agentTypesLabel: 'Subagent tokens of this project, by agent type',
+      noAgents: 'No subagents in this project',
+      hours: 'Hours of use',
+      hoursLabel: 'Tokens per hour of the day for this project',
+      noUsage: 'No usage in this period',
+      invocations: (count: number, formatted: string) =>
+        count === 1 ? '1 invocation' : `${formatted} invocations`,
+    },
+  },
+
+  /** Display names of agent types and kinds. */
+  agents: {
+    asideType: '/btw',
+    unknownType: 'Unknown type',
+    kinds: {
+      task: 'task',
+      workflow: 'workflow',
+      aside: 'side question',
+      warmup: 'warm-up',
+    },
+  },
+
+  charts: {
+    hour: (hour: number) => `${hour}h`,
+    hourRange: (hour: number) =>
+      `${String(hour).padStart(2, '0')}:00–${String((hour + 1) % 24).padStart(2, '0')}:00`,
+    tokens: 'Tokens',
+    total: 'Total',
+    main: 'Main sessions',
+    subagents: 'Subagents',
+    subagentShare: 'Subagent share',
+    ofTotal: 'Share of the day',
+  },
+
+  dates: {
+    today: 'Today',
+    yesterday: 'Yesterday',
+    daysAgo: (days: number) => `${days} days ago`,
+  },
+
+  table: {
+    sortBy: (column: string) => `Sort by ${column}`,
+  },
+
   placeholder: {
     title: 'Nothing to show yet',
     body: 'This section is not built yet. It will fill up with your usage data in an upcoming version.',

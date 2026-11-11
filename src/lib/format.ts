@@ -3,6 +3,9 @@
  * the system: `12.4M`, `412k`, `$7.90`, `Nov 10`.
  */
 
+import { daysInRange } from '../../shared/period';
+import { en } from '../i18n/en';
+
 const LOCALE = 'en-US';
 const PLACEHOLDER = '—';
 
@@ -115,6 +118,21 @@ export function formatDay(day: string, options: DayOptions = {}): string {
   if (!match || !month) return PLACEHOLDER;
   const label = `${month} ${Number(match[3])}`;
   return options.year ? `${label}, ${match[1]}` : label;
+}
+
+/**
+ * A past local day relative to today: `Today`, `Yesterday`, `5 days ago`, then `Nov 10`
+ * after a week, with the year once it is not this year's.
+ */
+export function formatRelativeDay(day: string, today: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^\d{4}-\d{2}-\d{2}$/.test(today)) {
+    return PLACEHOLDER;
+  }
+  const ago = daysInRange(day, today) - 1;
+  if (ago === 0) return en.dates.today;
+  if (ago === 1) return en.dates.yesterday;
+  if (ago > 1 && ago < 7) return en.dates.daysAgo(ago);
+  return formatDay(day, { year: day.slice(0, 4) !== today.slice(0, 4) });
 }
 
 /** A duration in milliseconds: `36 s`, `4.1 min`, `38 min`, `1h 23m`. */
