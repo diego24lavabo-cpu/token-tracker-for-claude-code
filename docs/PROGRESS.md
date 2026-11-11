@@ -9,7 +9,7 @@ Status of the build plan in [SPEC.md](SPEC.md) §8. Read this first when resumin
 | 1. Scaffold + repo files       | `33a47d4`             | Electron + Vite + React + TS, title bar, sidebar, page shells, repo files, CI |
 | 2. Parser, subagents, database | `09c4ceb`             | Recursive scan, dedup, subagents, SQLite history, incremental reads           |
 | 3. IPC API + Overview          | `380bda0` + follow-up | `getOverview`, KPI cards, daily chart, shortcut cards, cost estimate          |
-| 4. Projects page               | not committed yet     | `getProjects`, `getProjectDetail`, sortable `DataTable`, analysis panel       |
+| 4. Projects page               | `92776dd`             | `getProjects`, `getProjectDetail`, sortable `DataTable`, analysis panel       |
 
 CI (lint, typecheck, tests on macOS and Windows) is green up to `380bda0`.
 
