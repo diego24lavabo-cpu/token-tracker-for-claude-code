@@ -12,7 +12,7 @@ Status of the build plan in [SPEC.md](SPEC.md) §8. Read this first when resumin
 | 4. Projects page               | `92776dd`             | `getProjects`, `getProjectDetail`, sortable `DataTable`, analysis panel       |
 | 5. Models page                 | `6e79f86` + follow-up | `getModels`, model cards, weekly share (12 weeks), token types per model      |
 
-CI (lint, typecheck, tests on macOS and Windows) is green up to `f4c2318`.
+CI (lint, typecheck, tests on macOS and Windows) is green up to `e018d16`.
 
 ## Decisions and deviations from the spec
 
