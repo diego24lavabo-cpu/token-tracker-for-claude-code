@@ -212,6 +212,9 @@ export const en = {
     weekly: {
       title: 'Weekly share (12 weeks)',
       label: 'Tokens per week over the last 12 weeks, one segment per model',
+      labelShare: 'Share of each model in each of the last 12 weeks',
+      modeLabel: 'Show the weeks in',
+      modes: { tokens: 'Tokens', share: '%' },
       empty: 'No usage in these 12 weeks',
       weekOf: (day: string) => `Week of ${day}`,
     },

@@ -1,10 +1,11 @@
 import { FolderSearch } from 'lucide-react';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { ModelCard as ModelCardData, Models as ModelsData } from '../../shared/types';
 import { EmptyState } from '../components/EmptyState';
 import { Page } from '../components/Page';
+import { SegmentedControl } from '../components/SegmentedControl';
 import { TokenTypeBars } from '../components/TokenTypeBars';
-import { WeeklyModelBars, type ModelSeries } from '../components/WeeklyModelBars';
+import { WeeklyModelBars, type ModelSeries, type WeeklyMode } from '../components/WeeklyModelBars';
 import { useRangeFilters } from '../hooks/useRangeFilters';
 import { useUsageQuery } from '../hooks/useUsageQuery';
 import { en } from '../i18n/en';
@@ -14,6 +15,10 @@ import { useAppData } from '../state/appData';
 
 const NO_VALUE = '—';
 const t = en.models;
+const WEEKLY_MODES: readonly { value: WeeklyMode; label: string }[] = [
+  { value: 'tokens', label: t.weekly.modes.tokens },
+  { value: 'share', label: t.weekly.modes.share },
+];
 
 export function Models() {
   const filters = useRangeFilters();
@@ -157,22 +162,39 @@ function WeeklyCard({ data, colors }: { data: ModelsData | null; colors: Map<str
     color: colors.get(name)!,
   }));
   const empty = data !== null && series.length === 0;
+  // The chart is a share, so it opens in percentages.
+  const [mode, setMode] = useState<WeeklyMode>('share');
 
   return (
     <section className="card chart-card models-weekly">
       <header className="chart-card-header">
         <h2 className="card-title">{w.title}</h2>
-        <div className="chart-legend">
-          {series.map((model) => (
-            <span key={model.name} className="chart-legend-item">
-              <span className="swatch" style={{ background: model.color }} aria-hidden="true" />
-              {model.name}
-            </span>
-          ))}
+        <div className="chart-card-tools">
+          <div className="chart-legend">
+            {series.map((model) => (
+              <span key={model.name} className="chart-legend-item">
+                <span className="swatch" style={{ background: model.color }} aria-hidden="true" />
+                {model.name}
+              </span>
+            ))}
+          </div>
+          <SegmentedControl
+            label={w.modeLabel}
+            options={WEEKLY_MODES}
+            value={mode}
+            onChange={setMode}
+            tone="neutral"
+            size="small"
+          />
         </div>
       </header>
       <div className="chart-card-body">
-        <WeeklyModelBars data={data?.weekly ?? []} series={series} label={w.label} />
+        <WeeklyModelBars
+          data={data?.weekly ?? []}
+          series={series}
+          mode={mode}
+          label={mode === 'share' ? w.labelShare : w.label}
+        />
         {empty && <p className="chart-empty">{w.empty}</p>}
       </div>
     </section>

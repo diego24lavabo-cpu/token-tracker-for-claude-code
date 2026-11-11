@@ -11,6 +11,8 @@ interface SegmentedControlProps<T extends string> {
   onChange: (value: T) => void;
   /** `neutral` highlights the selection in white, `accent` in orange. */
   tone: 'neutral' | 'accent';
+  /** `small` fits in a card header. */
+  size?: 'normal' | 'small';
 }
 
 /** A row of mutually exclusive buttons. */
@@ -20,9 +22,11 @@ export function SegmentedControl<T extends string>({
   value,
   onChange,
   tone,
+  size = 'normal',
 }: SegmentedControlProps<T>) {
+  const className = `segmented segmented--${tone}${size === 'small' ? ' segmented--small' : ''}`;
   return (
-    <div className={`segmented segmented--${tone}`} role="group" aria-label={label}>
+    <div className={className} role="group" aria-label={label}>
       {options.map((option) => (
         <button
           key={option.value}

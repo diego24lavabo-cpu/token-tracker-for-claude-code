@@ -362,6 +362,18 @@ button {
   background: var(--accent);
 }
 
+.segmented--small {
+  padding: 2px;
+  border-radius: var(--radius-control);
+}
+
+.segmented--small .segmented-option {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
 /* ── Cards and empty states ────────────────────────────────── */
 
 .card {
@@ -475,6 +487,13 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.chart-card-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
 }
 
 .chart-legend-value {
@@ -1039,9 +1058,13 @@ button {
 
 /* ── Models page ───────────────────────────────────────────── */
 
+/* The cards stretch to fill the row, at most four per row. */
 .model-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(max(290px, calc((100% - 3 * var(--space-4)) / 4)), 1fr)
+  );
   gap: var(--space-4);
 }
 
@@ -1210,9 +1233,15 @@ button {
   background: var(--heat-0);
 }
 
+/* A non-zero type stays visible next to a cache read of 98%. */
 .token-type-part {
   flex-basis: 0;
-  min-width: 2px;
+  min-width: 4px;
+}
+
+.token-type-values {
+  color: var(--text-muted);
+  font-size: 11px;
 }
 
 .token-type--input {

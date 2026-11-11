@@ -10,7 +10,7 @@ Status of the build plan in [SPEC.md](SPEC.md) §8. Read this first when resumin
 | 2. Parser, subagents, database | `09c4ceb`             | Recursive scan, dedup, subagents, SQLite history, incremental reads           |
 | 3. IPC API + Overview          | `380bda0` + follow-up | `getOverview`, KPI cards, daily chart, shortcut cards, cost estimate          |
 | 4. Projects page               | `92776dd`             | `getProjects`, `getProjectDetail`, sortable `DataTable`, analysis panel       |
-| 5. Models page                 | "Add the Models page" | `getModels`, model cards, weekly share (12 weeks), token types per model      |
+| 5. Models page                 | `6e79f86` + follow-up | `getModels`, model cards, weekly share (12 weeks), token types per model      |
 
 CI (lint, typecheck, tests on macOS and Windows) is green up to `f4c2318`.
 
@@ -67,7 +67,9 @@ CI (lint, typecheck, tests on macOS and Windows) is green up to `f4c2318`.
 - The weekly chart always covers the 12 weeks (Monday to Sunday, `weekStart` / `lastWeeks` in `shared/period.ts`) that end with the week of the period's last day, whatever the period's length. The machine and other filters apply. The current week is partial.
 - One color per model, the same on the cards and in the charts: the period's models in card order, then the models seen only in the 12 weeks (`seriesColor` in `src/lib/chart.ts`: accent, light, dark, pale, then two heat colors).
 - Card numbers: messages = deduplicated responses (warm-ups included, they are API calls); output/msg = output / messages; subagent share = tokens with `kind <> 'main'` / model tokens; top project = most tokens on that model. Each card's cost is that model alone; a model without a price shows "—".
-- Token types bar: raw input, output, cache read, cache write, as shares of the model's tokens. Its label shows the cache hit rate (cache read / total input).
+- Token types bar: raw input, output, cache read, cache write, as shares of the model's tokens. Its label shows the cache hit rate (cache read / total input). Cache read dominates (about 98% on real data), so every non-zero segment is at least 4 px wide, and the four shares are written under the bar ("<0.1%" rather than "0%" for a type with tokens). Token counts are in the tooltips.
+- Weekly share opens in % mode (each week with usage is a 100% bar, Recharts `stackOffset="expand"`); a small "Tokens | %" toggle in the header switches to token heights. The choice is not remembered. `SegmentedControl` has a `size="small"` variant for card headers.
+- Model cards stretch to fill the row (`auto-fit`), at most four per row, at least 290 px wide.
 - No KPI row: the spec and the mockup have none on this page.
 - `TooltipRow` takes a `color` for swatches without a theme class.
 

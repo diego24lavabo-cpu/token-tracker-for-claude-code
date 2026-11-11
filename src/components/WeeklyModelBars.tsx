@@ -10,10 +10,14 @@ export interface ModelSeries {
   color: string;
 }
 
+/** `tokens`: bar heights in tokens. `share`: every week with usage is a 100% bar. */
+export type WeeklyMode = 'tokens' | 'share';
+
 interface WeeklyModelBarsProps {
   data: WeeklyShare[];
   /** One entry per value of `WeeklyShare.tokens`, in the same order. */
   series: ModelSeries[];
+  mode: WeeklyMode;
   /** Accessible description of the chart. */
   label: string;
 }
@@ -23,8 +27,9 @@ function weekTotal(point: WeeklyShare): number {
 }
 
 /** One bar per week, cut into one segment per model, the largest model at the bottom. */
-export function WeeklyModelBars({ data, series, label }: WeeklyModelBarsProps) {
-  const top = niceCeil(data.reduce((max, point) => Math.max(max, weekTotal(point)), 0));
+export function WeeklyModelBars({ data, series, mode, label }: WeeklyModelBarsProps) {
+  const share = mode === 'share';
+  const top = share ? 1 : niceCeil(data.reduce((max, point) => Math.max(max, weekTotal(point)), 0));
 
   return (
     <div className="chart" role="img" aria-label={label}>
@@ -33,6 +38,7 @@ export function WeeklyModelBars({ data, series, label }: WeeklyModelBarsProps) {
           data={data}
           margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
           barCategoryGap="22%"
+          stackOffset={share ? 'expand' : 'none'}
         >
           <XAxis
             dataKey="week"
@@ -47,7 +53,7 @@ export function WeeklyModelBars({ data, series, label }: WeeklyModelBarsProps) {
           <YAxis
             domain={[0, top]}
             ticks={[0, top / 2, top]}
-            tickFormatter={formatTokensAxis}
+            tickFormatter={share ? (value: number) => formatPercent(value) : formatTokensAxis}
             tick={AXIS_TICK}
             tickLine={false}
             axisLine={false}

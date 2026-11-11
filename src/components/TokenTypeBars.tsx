@@ -17,6 +17,14 @@ interface TokenTypeBarsProps {
   label: string;
 }
 
+/** Below this share, a type with tokens would print as 0%. */
+const SMALLEST_SHARE = 0.0005;
+
+/** A share as text, never 0% for a type that has tokens. */
+function shareText(tokens: number, share: number): string {
+  return tokens > 0 && share < SMALLEST_SHARE ? '<0.1%' : formatPercent(share);
+}
+
 /** One bar per item, cut by token type: input, output, cache read, cache write. */
 export function TokenTypeBars({ items, label }: TokenTypeBarsProps) {
   const names = en.models.tokenTypes.types;
@@ -28,13 +36,11 @@ export function TokenTypeBars({ items, label }: TokenTypeBarsProps) {
           const total = TYPES.reduce((sum, type) => sum + item.breakdown[type], 0);
           const share = (type: (typeof TYPES)[number]) =>
             total > 0 ? item.breakdown[type] / total : 0;
-          const summary = TYPES.map((type) => `${names[type]} ${formatPercent(share(type))}`).join(
-            ', ',
-          );
+          const tooltip = (type: (typeof TYPES)[number]) =>
+            `${names[type]} · ${formatTokens(item.breakdown[type])} · ${formatPercent(share(type))}`;
           return (
             <li key={item.key} className="token-type-item">
               <span className="token-type-label">{item.label}</span>
-              <span className="visually-hidden">{summary}</span>
               <span className="token-type-bar" aria-hidden="true">
                 {TYPES.map((type) =>
                   item.breakdown[type] > 0 ? (
@@ -42,10 +48,19 @@ export function TokenTypeBars({ items, label }: TokenTypeBarsProps) {
                       key={type}
                       className={`token-type-part token-type--${type}`}
                       style={{ flexGrow: item.breakdown[type] }}
-                      title={`${names[type]} · ${formatTokens(item.breakdown[type])} · ${formatPercent(share(type))}`}
+                      title={tooltip(type)}
                     />
                   ) : null,
                 )}
+              </span>
+              <span className="token-type-values">
+                {TYPES.map((type, index) => (
+                  <span key={type} title={tooltip(type)}>
+                    {index > 0 && ' · '}
+                    {names[type]}{' '}
+                    <span className="num">{shareText(item.breakdown[type], share(type))}</span>
+                  </span>
+                ))}
               </span>
             </li>
           );
