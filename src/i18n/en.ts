@@ -193,6 +193,41 @@ export const en = {
     },
   },
 
+  models: {
+    cards: {
+      label: 'Models used in the period',
+      empty: 'No usage in this period',
+      split: (input: string, output: string) => `Input ${input} · output ${output}`,
+      input: 'Input',
+      output: 'Output',
+      cacheHitRate: 'Cache hit rate',
+      cacheHitRateHint: 'Cache read / total input',
+      cost: 'Est. cost',
+      messages: 'Messages',
+      outputPerMessage: 'Output / msg',
+      subagents: 'Subagents',
+      subagentsHint: 'Share of this model’s tokens used by subagents',
+      topProject: 'Top project:',
+    },
+    weekly: {
+      title: 'Weekly share (12 weeks)',
+      label: 'Tokens per week over the last 12 weeks, one segment per model',
+      empty: 'No usage in these 12 weeks',
+      weekOf: (day: string) => `Week of ${day}`,
+    },
+    tokenTypes: {
+      title: 'Token types per model',
+      label: 'Token types of each model',
+      item: (model: string, cache: string) => `${model} · cache ${cache}`,
+      types: {
+        input: 'Input',
+        output: 'Output',
+        cacheRead: 'Cache read',
+        cacheWrite: 'Cache write',
+      },
+    },
+  },
+
   /** Display names of agent types and kinds. */
   agents: {
     asideType: '/btw',

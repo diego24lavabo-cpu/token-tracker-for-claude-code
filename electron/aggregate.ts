@@ -2,12 +2,22 @@
  * The aggregations behind each IPC endpoint. Everything the UI shows is computed here,
  * in SQL over the derived tables, never in the components.
  */
-import { addDays, daysInRange, eachDay, isDay, previousRange } from '../shared/period';
+import {
+  addDays,
+  daysInRange,
+  eachDay,
+  isDay,
+  lastWeeks,
+  previousRange,
+  weekStart,
+} from '../shared/period';
 import type {
   AgentKind,
   DailyPoint,
   Filters,
   MainSubagentPoint,
+  ModelCard,
+  Models,
   Overview,
   OverviewShortcuts,
   PeriodChange,
@@ -667,5 +677,117 @@ export function emptyProjectDetail(project: string, filters: Filters): ProjectDe
     machines: [],
     agentTypes: [],
     hours: Array.from({ length: 24 }, () => 0),
+  };
+}
+
+// ── Models ────────────────────────────────────────────────────────────────────
+
+/** The weekly share chart covers this many weeks, whatever the period. */
+export const WEEKLY_WEEKS = 12;
+
+/** The Models page: one card per model, and the share of each model week by week. */
+export function getModels(db: UsageDatabase, pricing: Pricing, filters: Filters): Models {
+  const where = hourlyWhere(filters);
+  const raw = db.raw;
+
+  const totals = raw
+    .prepare(
+      `SELECT ${MODEL_TOTALS}, SUM(messages) AS messages,
+              SUM(CASE WHEN kind <> 'main' THEN ${TOKENS} ELSE 0 END) AS subagent
+       FROM hourly WHERE ${where.sql} GROUP BY model HAVING SUM(${TOKENS}) > 0`,
+    )
+    .all(...where.params) as (ModelTotals & { messages: number; subagent: number })[];
+
+  const projectsByModel = new Map<string, { name: string; tokens: number }[]>();
+  const projectRows = raw
+    .prepare(
+      `SELECT model, project AS name, SUM(${TOKENS}) AS tokens
+       FROM hourly WHERE ${where.sql} GROUP BY model, project HAVING tokens > 0`,
+    )
+    .all(...where.params) as { model: string; name: string; tokens: number }[];
+  for (const row of projectRows) {
+    const list = projectsByModel.get(row.model) ?? [];
+    list.push(row);
+    projectsByModel.set(row.model, list);
+  }
+
+  const sized = totals.map((row) => ({
+    row,
+    name: row.model,
+    tokens: row.input + row.output + row.cache_write + row.cache_read,
+  }));
+  sized.sort(byTokens);
+  const totalTokens = sized.reduce((sum, item) => sum + item.tokens, 0);
+
+  const cards: ModelCard[] = sized.map(({ row, tokens }) => {
+    const input = row.input + row.cache_write + row.cache_read;
+    return {
+      name: row.model,
+      tokens,
+      share: ratio(tokens, totalTokens),
+      breakdown: {
+        input: row.input,
+        output: row.output,
+        cacheWrite: row.cache_write,
+        cacheRead: row.cache_read,
+      },
+      input,
+      output: row.output,
+      cacheHitRate: ratio(row.cache_read, input),
+      cost: costOfModels(pricing, [row]).cost,
+      messages: row.messages,
+      outputPerMessage: row.messages > 0 ? row.output / row.messages : null,
+      subagentShare: ratio(row.subagent, tokens),
+      topProject: largest(projectsByModel.get(row.model) ?? [])?.name ?? '',
+    };
+  });
+
+  return { hasData: hasAnyUsage(db, filters.machineIds), cards, ...weeklyShares(db, filters) };
+}
+
+/** Tokens per model and week over the weeks that end with the week of `filters.to`. */
+function weeklyShares(
+  db: UsageDatabase,
+  filters: Filters,
+): Pick<Models, 'weekly' | 'weeklyModels'> {
+  const weeks = lastWeeks(filters.to, WEEKLY_WEEKS);
+  const where = hourlyWhere({ ...filters, from: weeks[0]!, to: addDays(weeks.at(-1)!, 6) });
+  const rows = db.raw
+    .prepare(
+      `SELECT local_day AS day, model, SUM(${TOKENS}) AS tokens
+       FROM hourly WHERE ${where.sql} GROUP BY local_day, model HAVING tokens > 0`,
+    )
+    .all(...where.params) as { day: string; model: string; tokens: number }[];
+
+  const modelTotals = new Map<string, number>();
+  for (const row of rows) {
+    modelTotals.set(row.model, (modelTotals.get(row.model) ?? 0) + row.tokens);
+  }
+  const weeklyModels = [...modelTotals]
+    .map(([name, tokens]) => ({ name, tokens }))
+    .sort(byTokens)
+    .map((model) => model.name);
+  const modelIndex = new Map(weeklyModels.map((name, index) => [name, index]));
+  const weekIndex = new Map(weeks.map((week, index) => [week, index]));
+
+  const weekly = weeks.map((week) => ({
+    week,
+    tokens: weeklyModels.map(() => 0),
+  }));
+  for (const row of rows) {
+    const point = weekly[weekIndex.get(weekStart(row.day)) ?? -1];
+    const model = modelIndex.get(row.model);
+    if (point && model !== undefined) point.tokens[model] = (point.tokens[model] ?? 0) + row.tokens;
+  }
+  return { weekly, weeklyModels };
+}
+
+/** What the Models page shows when there is no database to read. */
+export function emptyModels(filters: Filters): Models {
+  return {
+    hasData: false,
+    cards: [],
+    weekly: lastWeeks(filters.to, WEEKLY_WEEKS).map((week) => ({ week, tokens: [] })),
+    weeklyModels: [],
   };
 }

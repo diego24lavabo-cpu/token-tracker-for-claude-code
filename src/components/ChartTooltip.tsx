@@ -17,14 +17,19 @@ interface TooltipRowProps {
   label: string;
   value: string;
   swatch?: Swatch;
+  /** A swatch of any color, for series without a theme class (one per model). */
+  color?: string;
   strong?: boolean;
 }
 
-export function TooltipRow({ label, value, swatch, strong }: TooltipRowProps) {
+export function TooltipRow({ label, value, swatch, color, strong }: TooltipRowProps) {
   return (
     <div className={strong ? 'chart-tooltip-row chart-tooltip-row--strong' : 'chart-tooltip-row'}>
       <span className="chart-tooltip-label">
         {swatch && <span className={`swatch swatch--${swatch}`} aria-hidden="true" />}
+        {!swatch && color && (
+          <span className="swatch" style={{ background: color }} aria-hidden="true" />
+        )}
         {label}
       </span>
       <span className="num">{value}</span>

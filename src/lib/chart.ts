@@ -7,9 +7,31 @@ export const CHART_COLORS = {
   accentDark: '#8e4a33',
   accentPale: '#fae3d8',
   accentOutput: '#f2c4b0',
+  heat1: '#5a3326',
+  heat3: '#c2633f',
   axis: '#a3a094',
   grid: '#2a2925',
 } as const;
+
+/**
+ * Colors of a chart with one series per item, such as one per model. The first four
+ * differ in lightness; the two after them only serve when there are more items.
+ */
+const SERIES_COLORS = [
+  CHART_COLORS.accent,
+  CHART_COLORS.accentLight,
+  CHART_COLORS.accentDark,
+  CHART_COLORS.accentPale,
+  CHART_COLORS.heat3,
+  CHART_COLORS.heat1,
+] as const;
+
+/** The color of the series at `index`, starting again from the first after the last. */
+export function seriesColor(index: number): string {
+  return SERIES_COLORS[
+    ((index % SERIES_COLORS.length) + SERIES_COLORS.length) % SERIES_COLORS.length
+  ]!;
+}
 
 /** Axis labels: small, muted, in the mono face like every number. */
 export const AXIS_TICK = { fill: CHART_COLORS.axis, fontSize: 11, fontFamily: 'var(--font-mono)' };

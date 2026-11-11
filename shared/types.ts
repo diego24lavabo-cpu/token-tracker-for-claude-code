@@ -225,6 +225,56 @@ export interface ProjectDetail {
   hours: number[];
 }
 
+// ── Models ────────────────────────────────────────────────────────────────────
+
+/** One model of the period, as a card of the Models page. */
+export interface ModelCard {
+  name: string;
+  /** All token types. */
+  tokens: number;
+  /** Part of all the period's tokens. */
+  share: number;
+  /** The four token types as the logs count them. */
+  breakdown: TokenBreakdown;
+  /** Total input: input + cache write + cache read. */
+  input: number;
+  output: number;
+  /** Cache read / total input. */
+  cacheHitRate: number;
+  /** Estimated cost at API prices, in US dollars. Null when the model has no price. */
+  cost: number | null;
+  /** API responses, deduplicated. */
+  messages: number;
+  /** Output tokens per response. Null without responses. */
+  outputPerMessage: number | null;
+  /** Part of the model's tokens used by subagents. */
+  subagentShare: number;
+  /** The project with the most tokens on this model. */
+  topProject: string;
+}
+
+/** Tokens of one week, Monday to Sunday. */
+export interface WeeklyShare {
+  /** The Monday, `YYYY-MM-DD`. */
+  week: string;
+  /** Tokens of each model of `Models.weeklyModels`, in the same order. */
+  tokens: number[];
+}
+
+export interface Models {
+  /** False when the database holds no usage at all, for the selected machines. */
+  hasData: boolean;
+  /** Largest first. */
+  cards: ModelCard[];
+  /**
+   * The 12 weeks that end with the week of the period's last day, oldest first, whatever
+   * the period's length. The other filters apply.
+   */
+  weekly: WeeklyShare[];
+  /** The models used in those weeks, largest first over the 12 weeks. */
+  weeklyModels: string[];
+}
+
 /** The API exposed to the renderer as `window.api` by the preload script. */
 export interface Api {
   /** Available synchronously so the title bar can lay out on first paint. */
@@ -234,6 +284,7 @@ export interface Api {
   getOverview(filters: Filters): Promise<Overview>;
   getProjects(filters: Filters): Promise<Projects>;
   getProjectDetail(project: string, filters: Filters): Promise<ProjectDetail>;
+  getModels(filters: Filters): Promise<Models>;
   /** Subscribes to "usage data changed" events. Returns an unsubscribe function. */
   onUsageUpdated(callback: () => void): () => void;
 }

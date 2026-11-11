@@ -4,9 +4,11 @@ import {
   daysInRange,
   eachDay,
   isDay,
+  lastWeeks,
   localDay,
   periodRange,
   previousRange,
+  weekStart,
 } from '../shared/period';
 
 describe('isDay', () => {
@@ -77,5 +79,21 @@ describe('localDay', () => {
   it('reads the calendar day shown by the system clock', () => {
     expect(localDay(new Date(2026, 0, 5, 23, 59, 59))).toBe('2026-01-05');
     expect(localDay(new Date(2026, 10, 10, 0, 0, 0))).toBe('2026-11-10');
+  });
+});
+
+describe('weeks', () => {
+  it('start on Monday', () => {
+    expect(weekStart('2026-11-09')).toBe('2026-11-09');
+    expect(weekStart('2026-11-10')).toBe('2026-11-09');
+    expect(weekStart('2026-11-15')).toBe('2026-11-09');
+    expect(weekStart('2026-11-08')).toBe('2026-11-02');
+    expect(weekStart('2027-01-01')).toBe('2026-12-28');
+    expect(weekStart('1970-01-01')).toBe('1969-12-29');
+  });
+
+  it('list the Mondays of the last weeks, oldest first', () => {
+    expect(lastWeeks('2026-11-12', 3)).toEqual(['2026-10-26', '2026-11-02', '2026-11-09']);
+    expect(lastWeeks('2026-11-12', 12)[0]).toBe('2026-08-24');
   });
 });

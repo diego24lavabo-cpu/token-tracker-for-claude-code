@@ -61,6 +61,20 @@ export function previousRange(from: string, to: string): { from: string; to: str
   return { from: addDays(from, -length), to: addDays(from, -1) };
 }
 
+/** The Monday of the week that holds `day`: weeks start on Monday. */
+export function weekStart(day: string): string {
+  const epochDay = toEpochDay(day);
+  // Day 0 of the epoch, 1970-01-01, was a Thursday: 3 days after a Monday.
+  const sinceMonday = (((epochDay + 3) % 7) + 7) % 7;
+  return fromEpochDay(epochDay - sinceMonday);
+}
+
+/** The Mondays of the `count` weeks that end with the week of `day`, oldest first. */
+export function lastWeeks(day: string, count: number): string[] {
+  const last = weekStart(day);
+  return Array.from({ length: count }, (_, index) => addDays(last, 7 * (index + 1 - count)));
+}
+
 /** The local calendar day of a `Date`, as the system clock shows it. */
 export function localDay(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, '0');

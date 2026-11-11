@@ -1037,6 +1037,207 @@ button {
   }
 }
 
+/* ── Models page ───────────────────────────────────────────── */
+
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: var(--space-4);
+}
+
+.model-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 18px 20px;
+}
+
+.model-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.model-card-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.model-card-swatch {
+  width: 10px;
+  height: 10px;
+}
+
+.model-card-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-card-share {
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.model-card-total {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.model-split {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--heat-0);
+}
+
+.model-split > span {
+  flex-basis: 0;
+  min-width: 2px;
+}
+
+.model-split-input {
+  background: var(--accent);
+}
+
+.model-split-output {
+  background: var(--accent-output);
+}
+
+.model-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px var(--space-5);
+  margin: var(--space-1) 0 0;
+  font-size: 12px;
+}
+
+.model-stat {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.model-stat dt {
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-stat dd {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.model-card-footer {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-card-project {
+  color: var(--text);
+}
+
+.models-empty {
+  padding: var(--space-5);
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.models-charts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: var(--space-4);
+}
+
+.models-weekly .chart-card-body {
+  flex: none;
+  height: 300px;
+}
+
+.token-types {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.token-type-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.token-type-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.token-type-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.token-type-bar {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--heat-0);
+}
+
+.token-type-part {
+  flex-basis: 0;
+  min-width: 2px;
+}
+
+.token-type--input {
+  background: var(--accent);
+}
+
+.token-type--output {
+  background: var(--accent-output);
+}
+
+.token-type--cacheRead {
+  background: var(--accent-dark);
+}
+
+.token-type--cacheWrite {
+  background: var(--heat-1);
+}
+
+/* Weekly share and token types side by side once there is room for both. */
+@media (min-width: 1180px) {
+  .models-charts {
+    grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr);
+  }
+}
+
 /* ── Window widths ─────────────────────────────────────────── */
 
 /* Large monitor: the six shortcuts fit on one line, the project panel sits next to the table. */

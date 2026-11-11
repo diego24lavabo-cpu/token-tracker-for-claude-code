@@ -7,6 +7,7 @@ import { IPC } from '../shared/ipc';
 import type {
   AppInfo,
   Machine,
+  Models,
   Overview,
   Platform,
   Pricing,
@@ -14,9 +15,11 @@ import type {
   Projects,
 } from '../shared/types';
 import {
+  emptyModels,
   emptyOverview,
   emptyProjectDetail,
   emptyProjects,
+  getModels,
   getOverview,
   getProjectDetail,
   getProjects,
@@ -217,6 +220,11 @@ function registerIpc(): void {
     return database
       ? getProjectDetail(database, pricing, project, filters)
       : emptyProjectDetail(project, filters);
+  });
+
+  handle<Models>(IPC.getModels, (_event, input) => {
+    const filters = parseFilters(input);
+    return database ? getModels(database, pricing, filters) : emptyModels(filters);
   });
 }
 

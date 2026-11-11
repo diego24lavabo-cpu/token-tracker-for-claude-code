@@ -2,9 +2,11 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   comparePeriods,
+  emptyModels,
   emptyOverview,
   emptyProjectDetail,
   emptyProjects,
+  getModels,
   getOverview,
   getProjectDetail,
   getProjects,
@@ -462,5 +464,114 @@ describe('parseProjectName', () => {
     ['a very long string', 'x'.repeat(1_001)],
   ])('rejects %s', (_name, input) => {
     expect(() => parseProjectName(input)).toThrow(InvalidRequestError);
+  });
+});
+
+describe('getModels', () => {
+  it('gives one card per model, largest first, adding up to the Overview total', async () => {
+    const db = await fixtureDb();
+    const { hasData, cards } = getModels(db, PRICING, BOTH_DAYS);
+
+    expect(hasData).toBe(true);
+    expect(cards.map((card) => [card.name, card.tokens])).toEqual([
+      ['Opus 5.5', 29175],
+      ['Haiku 5.5', 25549],
+      ['Sonnet 5.5', 9300],
+      ['Fable 5.2', 1110],
+    ]);
+    const overview = getOverview(db, PRICING, BOTH_DAYS, EVENING);
+    const sum = (pick: (card: (typeof cards)[number]) => number) =>
+      cards.reduce((total, card) => total + pick(card), 0);
+    expect(sum((card) => card.tokens)).toBe(overview.kpis.totalTokens);
+    expect(sum((card) => card.input)).toBe(overview.kpis.inputTokens);
+    expect(sum((card) => card.output)).toBe(overview.kpis.outputTokens);
+    expect(sum((card) => card.share)).toBeCloseTo(1, 10);
+    expect(sum((card) => card.cost ?? 0)).toBeCloseTo(overview.kpis.cost!, 12);
+    for (const card of cards) {
+      const { input, output, cacheWrite, cacheRead } = card.breakdown;
+      expect(input + output + cacheWrite + cacheRead).toBe(card.tokens);
+      expect(input + cacheWrite + cacheRead).toBe(card.input);
+    }
+  });
+
+  it('fills the numbers of a card', async () => {
+    const db = await fixtureDb();
+    const cards = getModels(db, PRICING, BOTH_DAYS).cards;
+    const haiku = cards.find((card) => card.name === 'Haiku 5.5')!;
+
+    // The Explore run and the warm-up agent.
+    expect(haiku).toMatchObject({
+      breakdown: { input: 48, output: 101, cacheWrite: 7200, cacheRead: 18200 },
+      input: 25448,
+      output: 101,
+      messages: 4,
+      subagentShare: 1,
+      topProject: 'demo-app',
+    });
+    expect(haiku.cacheHitRate).toBeCloseTo(18200 / 25448, 12);
+    expect(haiku.outputPerMessage).toBeCloseTo(101 / 4, 12);
+    expect(haiku.cost).toBeCloseTo((48 * 1 + 101 * 10 + 7200 * 2 + 18200 * 0.5) / 1e6, 12);
+
+    const opus = cards.find((card) => card.name === 'Opus 5.5')!;
+    // Only the /btw side question ran on Opus outside the main sessions.
+    expect(opus.subagentShare).toBeCloseTo(12040 / 29175, 12);
+    expect(opus.messages).toBe(7);
+
+    const fable = cards.find((card) => card.name === 'Fable 5.2')!;
+    expect(fable).toMatchObject({ subagentShare: 0, topProject: 'other-tool', messages: 3 });
+  });
+
+  it('shows no cost for a model without a price', async () => {
+    const db = await fixtureDb();
+    const pricing: Pricing = { lastChecked: null, models: { 'Opus 5.5': flat } };
+    const cards = getModels(db, pricing, BOTH_DAYS).cards;
+    expect(cards.find((card) => card.name === 'Opus 5.5')!.cost).not.toBeNull();
+    expect(cards.find((card) => card.name === 'Haiku 5.5')!.cost).toBeNull();
+  });
+
+  it('splits the 12 weeks ending with the period, whatever its length', async () => {
+    const db = await fixtureDb();
+    await scanLogs(db, [fixtureRoot('win')]);
+    const { weekly, weeklyModels } = getModels(db, PRICING, {
+      from: '2026-11-10',
+      to: '2026-11-10',
+    });
+
+    expect(weekly).toHaveLength(12);
+    expect(weekly[0]!.week).toBe('2026-08-24');
+    expect(weekly.at(-1)!.week).toBe('2026-11-09');
+    expect(weeklyModels).toEqual(['Opus 5.5', 'Haiku 5.5', 'Sonnet 5.5', 'Fable 5.2']);
+    // Monday 9 and Tuesday 10 fall in the last week, Sunday 8 in the one before.
+    expect(weekly.at(-1)!.tokens).toEqual([29175, 25549, 9300, 1110]);
+    expect(weekly.at(-2)!.tokens).toEqual([1100, 0, 200, 0]);
+    expect(weekly.slice(0, -2).every((point) => point.tokens.every((value) => value === 0))).toBe(
+      true,
+    );
+  });
+
+  it('applies the filters to the weeks too', async () => {
+    const db = await fixtureDb();
+    const haikuOnly = getModels(db, PRICING, { ...BOTH_DAYS, models: ['Haiku 5.5'] });
+    expect(haikuOnly.cards.map((card) => card.name)).toEqual(['Haiku 5.5']);
+    expect(haikuOnly.weeklyModels).toEqual(['Haiku 5.5']);
+    expect(haikuOnly.weekly.at(-1)!.tokens).toEqual([25549]);
+
+    const other = getModels(db, PRICING, { ...BOTH_DAYS, machineIds: ['another-machine'] });
+    expect(other).toEqual(emptyModels(BOTH_DAYS));
+  });
+
+  it('reports a quiet period as no cards, with the data flag still set', async () => {
+    const db = await fixtureDb();
+    const quiet = getModels(db, PRICING, { from: '2026-01-01', to: '2026-01-07' });
+    expect(quiet.hasData).toBe(true);
+    expect(quiet.cards).toEqual([]);
+    expect(quiet.weekly).toHaveLength(12);
+    expect(quiet.weeklyModels).toEqual([]);
+  });
+
+  it('describes an empty database', () => {
+    const db = openMemoryDb();
+    open.push(db);
+    expect(getModels(db, PRICING, BOTH_DAYS)).toEqual(emptyModels(BOTH_DAYS));
   });
 });

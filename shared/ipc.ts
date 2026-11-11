@@ -5,5 +5,6 @@ export const IPC = {
   getOverview: 'usage:overview',
   getProjects: 'usage:projects',
   getProjectDetail: 'usage:project-detail',
+  getModels: 'usage:models',
   usageUpdated: 'usage:updated',
 } as const;

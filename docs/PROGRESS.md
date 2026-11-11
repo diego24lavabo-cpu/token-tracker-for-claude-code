@@ -10,8 +10,9 @@ Status of the build plan in [SPEC.md](SPEC.md) §8. Read this first when resumin
 | 2. Parser, subagents, database | `09c4ceb`             | Recursive scan, dedup, subagents, SQLite history, incremental reads           |
 | 3. IPC API + Overview          | `380bda0` + follow-up | `getOverview`, KPI cards, daily chart, shortcut cards, cost estimate          |
 | 4. Projects page               | `92776dd`             | `getProjects`, `getProjectDetail`, sortable `DataTable`, analysis panel       |
+| 5. Models page                 | "Add the Models page" | `getModels`, model cards, weekly share (12 weeks), token types per model      |
 
-CI (lint, typecheck, tests on macOS and Windows) is green up to `380bda0`.
+CI (lint, typecheck, tests on macOS and Windows) is green up to `f4c2318`.
 
 ## Decisions and deviations from the spec
 
@@ -60,6 +61,16 @@ CI (lint, typecheck, tests on macOS and Windows) is green up to `380bda0`.
 - Layout: the panel sits next to the table from 1600 px (`2fr / minmax(460px, 1fr)`). Inside, the panel lays itself out with container queries (1, 2 or 3-zone grid), whatever its position.
 - Reusable pieces for later steps: `DataTable` (sort on header click, `aria-sort`, nulls last, optional row selection through a button in the first cell), `src/lib/sort.ts`, `MainSubagentBars` (Agents page), `HourBars` (Calendar), `HBars`, `SplitBar` (Machines), `ChartTooltip`, `formatRelativeDay`.
 
+**Models page**
+
+- `getModels` returns `{ hasData, cards, weekly, weeklyModels }`. `weekly[i].tokens` is an array in the order of `weeklyModels` (largest first over the 12 weeks), not a record keyed by model name.
+- The weekly chart always covers the 12 weeks (Monday to Sunday, `weekStart` / `lastWeeks` in `shared/period.ts`) that end with the week of the period's last day, whatever the period's length. The machine and other filters apply. The current week is partial.
+- One color per model, the same on the cards and in the charts: the period's models in card order, then the models seen only in the 12 weeks (`seriesColor` in `src/lib/chart.ts`: accent, light, dark, pale, then two heat colors).
+- Card numbers: messages = deduplicated responses (warm-ups included, they are API calls); output/msg = output / messages; subagent share = tokens with `kind <> 'main'` / model tokens; top project = most tokens on that model. Each card's cost is that model alone; a model without a price shows "—".
+- Token types bar: raw input, output, cache read, cache write, as shares of the model's tokens. Its label shows the cache hit rate (cache read / total input).
+- No KPI row: the spec and the mockup have none on this page.
+- `TooltipRow` takes a `color` for swatches without a theme class.
+
 **Database**
 
 - Schema version 4. Versions 2 and 3 empty the `files` table so the transcripts still on disk are read again to fill the new columns. Version 4 adds `session_projects` and rebuilds the derived tables from `messages` (checked on a real version-3 database).
@@ -73,13 +84,13 @@ CI (lint, typecheck, tests on macOS and Windows) is green up to `380bda0`.
 - Prices must be verified before release.
 - File watching is not in yet (step 9): the app scans only at startup.
 
-## Step 5 starts here: Models page
+## Step 6 starts here: Calendar page
 
-Spec: SPEC.md §5, Models. Suggested effort: `high`.
+Spec: SPEC.md §5, Calendar. Suggested effort: `high`.
 
-1. Same path as `getProjects`: types in `shared/types.ts`, a channel in `shared/ipc.ts`, `preload.ts`, a `handle()` in `electron/main.ts` with an `empty*` fallback.
-2. `getModels(filters)` in `electron/aggregate.ts`: one card per model from `hourly` (`MODEL_TOTALS`, `costOfModels` per model, subagent share = `kind <> 'main'`, top project), the weekly share over the last 12 weeks (weeks start Monday), and the token types per model.
-3. UI in `src/pages/Models.tsx`. Reuse `KpiCard`, `HBars`, `ChartTooltip`, `AXIS_TICK` / `BAR_CURSOR` from `src/lib/chart.ts`, and the multi-series colors `--accent`, `--accent-light`, `--accent-dark`, `--accent-pale` (they differ in lightness).
-4. Tests in `tests/aggregate.test.ts`: the models add up to the Overview total (fixture: Opus 5.5 29175, Haiku 5.5 25549; see the top of `tests/scanner.test.ts`).
+1. Same path as `getModels`: types in `shared/types.ts`, a channel in `shared/ipc.ts`, `preload.ts`, a `handle()` in `electron/main.ts` with an `empty*` fallback. SPEC §6 signature: `getCalendar(machineIds?)`; it ignores the period but follows the machine filter. It needs today's local day: pass `now` like `getOverview` (`db.localDay(now)`).
+2. `getCalendar` in `electron/aggregate.ts`: heatmap of the last 12 months (53 columns × 7 rows, weeks start Monday: reuse `weekStart`), KPIs (active days x/365, current streak: reuse `currentStreak`, longest streak, best day, average per active day), tokens by weekday, by hour (24) and by month (12).
+3. UI in `src/pages/Calendar.tsx`: a custom CSS-grid heatmap (ramp `--heat-0` to `--heat-4`, month and day labels, "Less → More" legend, a tooltip per cell). Reuse `KpiCard` (`kpi-grid--5`), `HourBars`, `ChartTooltip`. Best weekday in `--accent-light`. Clicking a day opens Sessions filtered to that day: the Sessions page comes in step 7, so navigate with the day in the route and let step 7 read it.
+4. Tests in `tests/aggregate.test.ts`: the heatmap days add up to the Overview total over the same range; streaks across a gap; weekday of a Sunday (fixture 2026-11-08, `win` root).
 
 Run tests from PowerShell: under Git Bash, vitest loads twice (drive letter case) and fails with "failed to find the current suite". Bash heredocs that contain quotes also fail in this shell: write files with the editor tools instead.
