@@ -10,11 +10,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { AgentInput, DatabaseStats, FileState, MessageInput, UsageDatabase } from './db';
 import {
+  locateInSessionFolder,
   modelDisplayName,
   parseLine,
   projectNameFromCwd,
   projectNameFromFolder,
-  projectNameFromSessionFolder,
+  type SessionFolderLocation,
   type UsageRecord,
 } from './parser';
 import {
@@ -76,8 +77,8 @@ interface ScanContext {
   summary: ScanSummary;
   /** Project recovered for each session folder, keyed by root and folder name. */
   folderProjects: Map<string, string>;
-  /** Cache of `projectNameFromSessionFolder`, which is called once per record. */
-  cwdProjects: Map<string, string | null>;
+  /** Cache of `locateInSessionFolder`, which is needed once per record. */
+  cwdLocations: Map<string, SessionFolderLocation | null>;
   modelNames: Map<string, string>;
 }
 
@@ -150,30 +151,37 @@ async function readHead(
  * project. A `cwd` outside the folder's tree falls back to `basename(cwd)`, except in a
  * subagent transcript, where the project is the parent session's.
  */
-function resolveProject(record: UsageRecord, file: DiscoveredFile, context: ScanContext): string {
+function resolveProject(
+  record: UsageRecord,
+  file: DiscoveredFile,
+  context: ScanContext,
+): SessionFolderLocation {
   const key = folderKey(file.root, file.cls.projectFolder);
 
   if (record.cwd) {
     const cacheKey = `${record.cwd}\u0000${file.cls.projectFolder}`;
-    let fromFolder = context.cwdProjects.get(cacheKey);
-    if (fromFolder === undefined) {
-      fromFolder = projectNameFromSessionFolder(record.cwd, file.cls.projectFolder);
-      context.cwdProjects.set(cacheKey, fromFolder);
+    let location = context.cwdLocations.get(cacheKey);
+    if (location === undefined) {
+      location = locateInSessionFolder(record.cwd, file.cls.projectFolder);
+      context.cwdLocations.set(cacheKey, location);
     }
-    if (fromFolder) {
-      context.folderProjects.set(key, fromFolder);
-      return fromFolder;
+    if (location) {
+      context.folderProjects.set(key, location.project);
+      return location;
     }
 
     if (file.cls.isSubagentFile) {
       const parentProject = context.folderProjects.get(key);
-      if (parentProject) return parentProject;
+      if (parentProject) return { project: parentProject, subfolder: '' };
     }
     const fromCwd = projectNameFromCwd(record.cwd);
-    if (fromCwd) return fromCwd;
+    if (fromCwd) return { project: fromCwd, subfolder: '' };
   }
 
-  return context.folderProjects.get(key) ?? projectNameFromFolder(file.cls.projectFolder);
+  return {
+    project: context.folderProjects.get(key) ?? projectNameFromFolder(file.cls.projectFolder),
+    subfolder: '',
+  };
 }
 
 function modelName(modelId: string, context: ScanContext): string {
@@ -264,7 +272,7 @@ async function readFile(
       dedupKey: record.dedupKey,
       timestamp: record.timestamp,
       sessionId: attribution.sessionId,
-      project: resolveProject(record, file, context),
+      ...resolveProject(record, file, context),
       modelId: record.modelId,
       model: modelName(record.modelId, context),
       kind: attribution.kind,
@@ -272,6 +280,7 @@ async function readFile(
       rank: attribution.rank,
       stopReason: record.stopReason,
       tokens: record.tokens,
+      cacheWrite1h: record.cacheWrite1h,
     });
 
     if (attribution.agentId !== null) {
@@ -365,7 +374,7 @@ export async function scanLogs(db: UsageDatabase, roots: string[]): Promise<Scan
     db,
     summary,
     folderProjects: new Map(),
-    cwdProjects: new Map(),
+    cwdLocations: new Map(),
     modelNames: new Map(),
   };
   for (const state of states.values()) {

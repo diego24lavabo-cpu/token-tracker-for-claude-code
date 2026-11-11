@@ -52,6 +52,8 @@ export interface LineOptions {
   stop?: string | null;
   sidechain?: boolean;
   agentId?: string;
+  /** How much of the cache write went to the 1-hour cache. Adds the breakdown to the usage. */
+  cache1h?: number;
 }
 
 /** A synthetic assistant line, shaped like the ones Claude Code writes. */
@@ -66,6 +68,7 @@ export function assistantLine(options: LineOptions): string {
     stop = 'end_turn',
     sidechain = false,
     agentId,
+    cache1h,
   } = options;
   return JSON.stringify({
     isSidechain: sidechain,
@@ -85,6 +88,14 @@ export function assistantLine(options: LineOptions): string {
         output_tokens: u[1],
         cache_creation_input_tokens: u[2],
         cache_read_input_tokens: u[3],
+        ...(cache1h === undefined
+          ? {}
+          : {
+              cache_creation: {
+                ephemeral_5m_input_tokens: u[2] - cache1h,
+                ephemeral_1h_input_tokens: cache1h,
+              },
+            }),
       },
     },
     requestId: `req_test_${id}`,

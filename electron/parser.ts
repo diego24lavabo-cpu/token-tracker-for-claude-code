@@ -31,6 +31,11 @@ export interface UsageRecord {
   agentId: string | null;
   stopReason: string | null;
   tokens: TokenBreakdown;
+  /**
+   * The part of `tokens.cacheWrite` written to the 1-hour cache, which is billed at a
+   * higher rate than the default 5-minute cache. Zero when the log does not say.
+   */
+  cacheWrite1h: number;
 }
 
 export type IgnoredReason = 'other-type' | 'synthetic' | 'empty-usage';
@@ -73,7 +78,7 @@ function sumCacheCreation(value: unknown): number | null {
   return total;
 }
 
-function readTokens(usage: JsonObject): TokenBreakdown | null {
+function readTokens(usage: JsonObject): { tokens: TokenBreakdown; cacheWrite1h: number } | null {
   const input = tokenCount(usage.input_tokens);
   const output = tokenCount(usage.output_tokens);
   const cacheRead = tokenCount(usage.cache_read_input_tokens);
@@ -81,11 +86,18 @@ function readTokens(usage: JsonObject): TokenBreakdown | null {
     tokenCount(usage.cache_creation_input_tokens) ?? sumCacheCreation(usage.cache_creation);
 
   if (input === null && output === null && cacheRead === null && cacheWrite === null) return null;
+
+  const oneHour = isObject(usage.cache_creation)
+    ? tokenCount(usage.cache_creation.ephemeral_1h_input_tokens)
+    : null;
   return {
-    input: input ?? 0,
-    output: output ?? 0,
-    cacheWrite: cacheWrite ?? 0,
-    cacheRead: cacheRead ?? 0,
+    tokens: {
+      input: input ?? 0,
+      output: output ?? 0,
+      cacheWrite: cacheWrite ?? 0,
+      cacheRead: cacheRead ?? 0,
+    },
+    cacheWrite1h: Math.min(oneHour ?? 0, cacheWrite ?? 0),
   };
 }
 
@@ -127,8 +139,9 @@ export function parseLine(line: string): ParsedLine {
     return { kind: 'skipped', reason: 'missing-usage' };
   }
 
-  const tokens = readTokens(message.usage);
-  if (!tokens) return { kind: 'skipped', reason: 'invalid-usage' };
+  const usage = readTokens(message.usage);
+  if (!usage) return { kind: 'skipped', reason: 'invalid-usage' };
+  const { tokens, cacheWrite1h } = usage;
   if (tokens.input + tokens.output + tokens.cacheWrite + tokens.cacheRead === 0) {
     return { kind: 'ignored', reason: 'empty-usage' };
   }
@@ -151,6 +164,7 @@ export function parseLine(line: string): ParsedLine {
       agentId: nonEmptyString(value.agentId),
       stopReason: nonEmptyString(message.stop_reason),
       tokens,
+      cacheWrite1h,
     },
   };
 }
@@ -255,16 +269,37 @@ export function encodeProjectPath(target: string): string {
  * Returns null when no parent of `cwd` matches, for example after a `cd` to another tree.
  */
 export function projectNameFromSessionFolder(cwd: string, folderName: string): string | null {
+  return locateInSessionFolder(cwd, folderName)?.project ?? null;
+}
+
+export interface SessionFolderLocation {
+  /** Name of the directory the session folder stands for. */
+  project: string;
+  /**
+   * Name of the directory directly under it that `cwd` is in, or an empty string when
+   * `cwd` is the project directory itself. `…/demo-app/packages/web` → `packages`.
+   */
+  subfolder: string;
+}
+
+/** Where a record's `cwd` sits relative to the directory its session folder stands for. */
+export function locateInSessionFolder(
+  cwd: string,
+  folderName: string,
+): SessionFolderLocation | null {
   if (!folderName) return null;
   const flavor = pathFlavor(cwd);
   const target = folderName.toLowerCase();
   let current = stripTrailingSeparators(flavor.normalize(cwd));
+  let subfolder = '';
   for (;;) {
     if (encodeProjectPath(current).toLowerCase() === target) {
-      return flavor.basename(current) || null;
+      const project = flavor.basename(current);
+      return project ? { project, subfolder } : null;
     }
     const parent = flavor.dirname(current);
     if (parent === current) return null;
+    subfolder = flavor.basename(current);
     current = parent;
   }
 }

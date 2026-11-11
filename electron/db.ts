@@ -19,7 +19,8 @@ import { createLocalClock, systemTimeZone, type LocalClock } from './timezone';
 
 type Sqlite = Database.Database;
 
-const MIGRATIONS: ReadonlyArray<(db: Sqlite) => void> = [
+/** Schema steps, applied in order. A step that has shipped is never edited. */
+export const MIGRATIONS: ReadonlyArray<(db: Sqlite) => void> = [
   (db) => {
     db.exec(`
       CREATE TABLE settings (
@@ -152,9 +153,43 @@ const MIGRATIONS: ReadonlyArray<(db: Sqlite) => void> = [
       CREATE INDEX subagents_start ON subagents (start_day);
     `);
   },
+  // Adds the active time of sessions and subagent runs, and the part of the cache writes
+  // that went to the 1-hour cache ('cache_write_1h' is included in 'cache_write').
+  // The derived tables are rebuilt to fill the first. For the second, the file list is
+  // emptied so that every transcript still on disk is read again; nothing else is lost,
+  // and usage whose transcript is gone keeps a 1-hour share of zero.
+  (db) => {
+    db.exec(`
+      ALTER TABLE sessions ADD COLUMN active_ms INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE subagents ADD COLUMN active_ms INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE messages ADD COLUMN cache_write_1h INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE hourly ADD COLUMN cache_write_1h INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE sessions ADD COLUMN cache_write_1h INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE subagents ADD COLUMN cache_write_1h INTEGER NOT NULL DEFAULT 0;
+      DELETE FROM files;
+      INSERT INTO settings (key, value) VALUES ('derived_dirty', '1')
+        ON CONFLICT (key) DO UPDATE SET value = '1';
+    `);
+  },
+  // Adds the directory under the project a response was made in ('subfolder', empty at
+  // the top of the project). Transcripts are deleted by Claude Code after a while, so
+  // this is kept from now on: it lets the way projects are named change later without
+  // losing history. The file list is emptied to read the transcripts still on disk again.
+  (db) => {
+    db.exec(`
+      ALTER TABLE messages ADD COLUMN subfolder TEXT NOT NULL DEFAULT '';
+      DELETE FROM files;
+    `);
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
+
+/**
+ * A pause longer than this between two consecutive responses is time spent away, not
+ * time spent working: it does not count towards the active time of a session.
+ */
+export const ACTIVE_GAP_LIMIT_MS = 30 * 60 * 1000;
 
 /** Thrown when the database was written by a newer version of the app. */
 export class DatabaseVersionError extends Error {
@@ -198,6 +233,23 @@ interface Scope {
   sessions: string;
 }
 
+/**
+ * Active time: the sum of the gaps between consecutive responses, leaving out the long
+ * ones. 'partition' lists the columns that identify one session or one subagent run.
+ */
+function activeTime(partition: string): string {
+  return `
+     gaps AS (
+       SELECT ${partition}, ts - LAG(ts) OVER (PARTITION BY ${partition} ORDER BY ts, id) AS gap
+       FROM scoped
+     ),
+     active AS (
+       SELECT ${partition},
+              COALESCE(SUM(CASE WHEN gap <= ${ACTIVE_GAP_LIMIT_MS} THEN gap ELSE 0 END), 0) AS active_ms
+       FROM gaps GROUP BY ${partition}
+     )`;
+}
+
 const EVERYTHING: Scope = { agents: '1', buckets: '1', sessions: '1' };
 
 const TOUCHED: Scope = {
@@ -212,15 +264,16 @@ function refreshStatements(scope: Scope): string[] {
     `DELETE FROM subagents WHERE machine_id = @machine AND ${scope.agents}`,
     `INSERT INTO subagents (machine_id, session_id, agent_id, project, agent_type, kind, model,
                             start_ts, end_ts, start_day, calls, startup_input,
-                            input, output, cache_write, cache_read)
+                            input, output, cache_write, cache_read, cache_write_1h, active_ms)
      WITH scoped AS (
        SELECT * FROM messages WHERE agent_id IS NOT NULL AND ${scope.agents}
-     ),
+     ),${activeTime('session_id, agent_id')},
      agg AS (
        SELECT session_id, agent_id, MIN(kind) AS kind, COUNT(*) AS calls,
               MIN(ts) AS start_ts, MAX(ts) AS end_ts,
               SUM(input) AS input, SUM(output) AS output,
               SUM(cache_write) AS cache_write, SUM(cache_read) AS cache_read,
+              SUM(cache_write_1h) AS cache_write_1h,
               SUM(stop_reason IS NOT NULL) AS stops
        FROM scoped GROUP BY session_id, agent_id
      ),
@@ -245,8 +298,9 @@ function refreshStatements(scope: Scope): string[] {
      SELECT @machine, a.session_id, a.agent_id, p.project,
             COALESCE(meta.agent_type, '${UNKNOWN_AGENT_TYPE}'), ${EFFECTIVE_KIND}, m.model,
             a.start_ts, a.end_ts, f.local_day, a.calls, f.startup_input,
-            a.input, a.output, a.cache_write, a.cache_read
+            a.input, a.output, a.cache_write, a.cache_read, a.cache_write_1h, t.active_ms
      FROM agg a
+     JOIN active t ON t.session_id = a.session_id AND t.agent_id = a.agent_id
      JOIN first_call f
        ON f.session_id = a.session_id AND f.agent_id = a.agent_id AND f.position = 1
      JOIN by_model m
@@ -258,7 +312,7 @@ function refreshStatements(scope: Scope): string[] {
 
     `DELETE FROM hourly WHERE machine_id = @machine AND ${scope.buckets}`,
     `INSERT INTO hourly (machine_id, local_day, local_hour, project, model, kind, agent_type,
-                         input, output, cache_write, cache_read, messages)
+                         input, output, cache_write, cache_read, cache_write_1h, messages)
      WITH scoped AS (
        SELECT * FROM messages WHERE ${scope.buckets}
      )
@@ -266,7 +320,8 @@ function refreshStatements(scope: Scope): string[] {
             CASE WHEN m.agent_id IS NULL THEN 'main' ELSE COALESCE(s.kind, m.kind) END,
             CASE WHEN m.agent_id IS NULL THEN ''
                  ELSE COALESCE(s.agent_type, '${UNKNOWN_AGENT_TYPE}') END,
-            SUM(m.input), SUM(m.output), SUM(m.cache_write), SUM(m.cache_read), COUNT(*)
+            SUM(m.input), SUM(m.output), SUM(m.cache_write), SUM(m.cache_read),
+            SUM(m.cache_write_1h), COUNT(*)
      FROM scoped m
      LEFT JOIN subagents s
        ON s.machine_id = @machine AND s.session_id = m.session_id AND s.agent_id = m.agent_id
@@ -274,11 +329,11 @@ function refreshStatements(scope: Scope): string[] {
 
     `DELETE FROM sessions WHERE machine_id = @machine AND ${scope.sessions}`,
     `INSERT INTO sessions (machine_id, session_id, project, model, start_ts, end_ts, start_day,
-                           messages, input, output, cache_write, cache_read,
-                           subagent_count, subagent_tokens)
+                           messages, input, output, cache_write, cache_read, cache_write_1h,
+                           subagent_count, subagent_tokens, active_ms)
      WITH scoped AS (
        SELECT * FROM messages WHERE ${scope.sessions}
-     ),
+     ),${activeTime('session_id')},
      agg AS (
        SELECT session_id,
               SUM(agent_id IS NULL) AS messages,
@@ -287,6 +342,7 @@ function refreshStatements(scope: Scope): string[] {
               MIN(ts) AS any_start, MAX(ts) AS any_end,
               SUM(input) AS input, SUM(output) AS output,
               SUM(cache_write) AS cache_write, SUM(cache_read) AS cache_read,
+              SUM(cache_write_1h) AS cache_write_1h,
               SUM(CASE WHEN agent_id IS NULL THEN 0 ELSE ${TOKENS} END) AS subagent_tokens
        FROM scoped GROUP BY session_id
      ),
@@ -313,12 +369,13 @@ function refreshStatements(scope: Scope): string[] {
      )
      SELECT @machine, a.session_id, p.project, m.model,
             COALESCE(a.main_start, a.any_start), COALESCE(a.main_end, a.any_end), f.local_day,
-            a.messages, a.input, a.output, a.cache_write, a.cache_read,
+            a.messages, a.input, a.output, a.cache_write, a.cache_read, a.cache_write_1h,
             (SELECT COUNT(*) FROM subagents s
               WHERE s.machine_id = @machine AND s.session_id = a.session_id
                 AND s.kind <> 'warmup'),
-            a.subagent_tokens
+            a.subagent_tokens, t.active_ms
      FROM agg a
+     JOIN active t ON t.session_id = a.session_id
      JOIN first_message f ON f.session_id = a.session_id AND f.position = 1
      JOIN by_model m ON m.session_id = a.session_id AND m.position = 1
      JOIN by_project p ON p.session_id = a.session_id AND p.position = 1`,
@@ -368,6 +425,8 @@ export interface MessageInput {
   timestamp: number;
   sessionId: string;
   project: string;
+  /** Directory directly under the project the response was made in; empty at the top. */
+  subfolder: string;
   modelId: string;
   model: string;
   kind: BaseKind;
@@ -375,6 +434,8 @@ export interface MessageInput {
   rank: number;
   stopReason: string | null;
   tokens: TokenBreakdown;
+  /** The part of `tokens.cacheWrite` written to the 1-hour cache. */
+  cacheWrite1h: number;
 }
 
 /** A subagent seen while reading a transcript. */
@@ -416,6 +477,8 @@ export interface SubagentRow {
   model: string;
   startTs: number;
   endTs: number;
+  /** Time between the first and last call, long pauses left out. */
+  activeMs: number;
   calls: number;
   startupInput: number;
   tokens: TokenBreakdown;
@@ -431,6 +494,8 @@ interface ExistingMessage {
   output: number;
   cache_write: number;
   cache_read: number;
+  cache_write_1h: number;
+  subfolder: string;
   stop_reason: string | null;
   rank: number;
 }
@@ -523,6 +588,11 @@ export class UsageDatabase {
   /** The time zone used for local days and hours. */
   get timeZone(): string {
     return this.clock.timeZone;
+  }
+
+  /** The local day (`YYYY-MM-DD`) of an instant, in that time zone. */
+  localDay(timestampMs: number): string {
+    return this.clock.toLocal(timestampMs).day;
   }
 
   // ── Settings and machines ───────────────────────────────────────────────────
@@ -712,6 +782,7 @@ export class UsageDatabase {
         local_hour: local.hour,
         session_id: message.sessionId,
         project: message.project,
+        subfolder: message.subfolder,
         model_id: message.modelId,
         model: message.model,
         kind: message.kind,
@@ -720,6 +791,7 @@ export class UsageDatabase {
         output: message.tokens.output,
         cache_write: message.tokens.cacheWrite,
         cache_read: message.tokens.cacheRead,
+        cache_write_1h: message.cacheWrite1h,
         stop_reason: message.stopReason,
         rank: message.rank,
       });
@@ -732,12 +804,16 @@ export class UsageDatabase {
     const output = Math.max(existing.output, message.tokens.output);
     const cacheWrite = Math.max(existing.cache_write, message.tokens.cacheWrite);
     const cacheRead = Math.max(existing.cache_read, message.tokens.cacheRead);
+    const cacheWrite1h = Math.max(existing.cache_write_1h, message.cacheWrite1h);
     const stopReason = existing.stop_reason ?? message.stopReason;
+    const subfolder = existing.subfolder || message.subfolder;
     const moreComplete =
+      subfolder !== existing.subfolder ||
       input !== existing.input ||
       output !== existing.output ||
       cacheWrite !== existing.cache_write ||
       cacheRead !== existing.cache_read ||
+      cacheWrite1h !== existing.cache_write_1h ||
       stopReason !== existing.stop_reason;
     const betterPlace = message.rank > existing.rank;
     if (!moreComplete && !betterPlace) return 'duplicates';
@@ -748,6 +824,7 @@ export class UsageDatabase {
         id: existing.id,
         session_id: message.sessionId,
         project: message.project,
+        subfolder: message.subfolder,
         kind: message.kind,
         agent_id: message.agentId,
         rank: message.rank,
@@ -761,7 +838,10 @@ export class UsageDatabase {
         output,
         cache_write: cacheWrite,
         cache_read: cacheRead,
+        cache_write_1h: cacheWrite1h,
         stop_reason: stopReason,
+        // A move just above already set the subfolder of the better copy.
+        subfolder: betterPlace ? message.subfolder : subfolder,
       });
     }
     return 'upgraded';
@@ -903,7 +983,7 @@ export class UsageDatabase {
     const rows = this.raw
       .prepare(
         `SELECT session_id, agent_id, project, agent_type, kind, model, start_ts, end_ts,
-                calls, startup_input, input, output, cache_write, cache_read
+                active_ms, calls, startup_input, input, output, cache_write, cache_read
          FROM subagents WHERE machine_id = ? ORDER BY start_ts, agent_id`,
       )
       .all(this.machineId) as {
@@ -915,6 +995,7 @@ export class UsageDatabase {
       model: string;
       start_ts: number;
       end_ts: number;
+      active_ms: number;
       calls: number;
       startup_input: number;
       input: number;
@@ -931,6 +1012,7 @@ export class UsageDatabase {
       model: row.model,
       startTs: row.start_ts,
       endTs: row.end_ts,
+      activeMs: row.active_ms,
       calls: row.calls,
       startupInput: row.startup_input,
       tokens: {
@@ -975,25 +1057,29 @@ function prepareStatements(db: Sqlite) {
     ),
     getMessage: db.prepare(
       `SELECT id, local_day, local_hour, session_id, agent_id,
-                input, output, cache_write, cache_read, stop_reason, rank
+                input, output, cache_write, cache_read, cache_write_1h, subfolder,
+                stop_reason, rank
          FROM messages WHERE dedup_key = ?`,
     ),
     insertMessage: db.prepare(
-      `INSERT INTO messages (dedup_key, ts, local_day, local_hour, session_id, project,
+      `INSERT INTO messages (dedup_key, ts, local_day, local_hour, session_id, project, subfolder,
                                model_id, model, kind, agent_id,
-                               input, output, cache_write, cache_read, stop_reason, rank)
-         VALUES (@dedup_key, @ts, @local_day, @local_hour, @session_id, @project,
+                               input, output, cache_write, cache_read, cache_write_1h,
+                               stop_reason, rank)
+         VALUES (@dedup_key, @ts, @local_day, @local_hour, @session_id, @project, @subfolder,
                  @model_id, @model, @kind, @agent_id,
-                 @input, @output, @cache_write, @cache_read, @stop_reason, @rank)`,
+                 @input, @output, @cache_write, @cache_read, @cache_write_1h,
+                 @stop_reason, @rank)`,
     ),
     moveMessage: db.prepare(
-      `UPDATE messages SET session_id = @session_id, project = @project, kind = @kind,
-                             agent_id = @agent_id, rank = @rank
+      `UPDATE messages SET session_id = @session_id, project = @project, subfolder = @subfolder,
+                             kind = @kind, agent_id = @agent_id, rank = @rank
          WHERE id = @id`,
     ),
     completeMessage: db.prepare(
       `UPDATE messages SET input = @input, output = @output, cache_write = @cache_write,
-                             cache_read = @cache_read, stop_reason = @stop_reason
+                             cache_read = @cache_read, cache_write_1h = @cache_write_1h,
+                             stop_reason = @stop_reason, subfolder = @subfolder
          WHERE id = @id`,
     ),
   };

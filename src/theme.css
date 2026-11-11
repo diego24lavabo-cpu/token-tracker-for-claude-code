@@ -370,6 +370,242 @@ button {
   background: var(--bg-card);
 }
 
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* ── KPI cards ─────────────────────────────────────────────── */
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.kpi-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: 18px 20px;
+}
+
+.kpi-label {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.kpi-value {
+  overflow: hidden;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kpi-hint {
+  color: var(--accent);
+  font-size: 12px;
+}
+
+/* ── Charts ────────────────────────────────────────────────── */
+
+.chart-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: 20px;
+}
+
+/* Takes the height the window has left, within sensible bounds. */
+.chart-card--grow {
+  flex: 1 1 300px;
+  min-height: 300px;
+  max-height: 520px;
+}
+
+.chart-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.chart-card-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.chart {
+  position: absolute;
+  inset: 0;
+}
+
+/* The chart is described by its label; its inner SVG is not a tab stop. */
+.chart :focus {
+  outline: none;
+}
+
+.chart-empty {
+  position: absolute;
+  inset: 0 0 28px 52px;
+  display: grid;
+  color: var(--text-muted);
+  font-size: 13px;
+  pointer-events: none;
+  place-items: center;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-legend-value {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.swatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.swatch--input {
+  background: var(--accent);
+}
+
+.swatch--output {
+  background: var(--accent-output);
+}
+
+.chart-tooltip {
+  min-width: 170px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-sidebar);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+  font-size: 12px;
+}
+
+.chart-tooltip-title {
+  margin-bottom: 6px;
+  color: var(--text-muted);
+}
+
+.chart-tooltip-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 2px 0;
+  color: var(--text-muted);
+}
+
+.chart-tooltip-row .num {
+  color: var(--text);
+}
+
+.chart-tooltip-row--strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.chart-tooltip-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── Shortcut cards ────────────────────────────────────────── */
+
+.shortcut-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.shortcut-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: var(--space-4) 18px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.shortcut-card:hover {
+  border-color: var(--accent-dark);
+  background: #201f1c;
+}
+
+.shortcut-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.shortcut-label svg {
+  color: var(--accent);
+}
+
+.shortcut-headline {
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcut-detail {
+  overflow: hidden;
+  color: var(--accent);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Window widths ─────────────────────────────────────────── */
+
+/* Large monitor: the six shortcuts fit on one line. */
+@media (min-width: 1600px) {
+  .shortcut-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+/* Minimum window width: the KPI cards wrap two by two. */
+@media (max-width: 1179px) {
+  .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .empty-state {
   display: flex;
   flex: 1;

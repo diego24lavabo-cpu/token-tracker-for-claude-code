@@ -3,6 +3,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   DatabaseVersionError,
+  MIGRATIONS,
   SCHEMA_VERSION,
   UsageDatabase,
   type AgentInput,
@@ -51,6 +52,7 @@ function message(overrides: Partial<MessageInput> & { dedupKey: string }): Messa
     timestamp: NOON,
     sessionId: 's1',
     project: 'demo-app',
+    subfolder: '',
     modelId: 'claude-opus-5-5',
     model: 'Opus 5.5',
     kind: 'main',
@@ -58,6 +60,7 @@ function message(overrides: Partial<MessageInput> & { dedupKey: string }): Messa
     rank: RANK.ownMain,
     stopReason: 'end_turn',
     tokens: { input: 10, output: 5, cacheWrite: 0, cacheRead: 100 },
+    cacheWrite1h: 0,
     ...overrides,
   };
 }
@@ -310,8 +313,11 @@ describe('derived tables', () => {
       output: 85,
       cache_write: 7200,
       cache_read: 7300,
+      cache_write_1h: 0,
       subagent_count: 1,
       subagent_tokens: 14305,
+      // 12:00 to 12:45 through every response of the session, subagents included.
+      active_ms: 45 * 60_000,
     });
 
     expect(db.listSubagents()).toEqual([
@@ -324,6 +330,8 @@ describe('derived tables', () => {
         model: 'Haiku 5.5',
         startTs: at(5),
         endTs: at(45),
+        // Its two calls are 40 minutes apart: a pause that long is not active time.
+        activeMs: 0,
         calls: 2,
         // Total input of the first call: what the agent loads before doing anything.
         startupInput: 7030,
@@ -343,6 +351,117 @@ describe('derived tables', () => {
       { model: 'Opus 5.5', kind: 'main', agent_type: '', messages: 2, tokens: 230 },
       { model: 'Sonnet 5.5', kind: 'main', agent_type: '', messages: 1, tokens: 115 },
     ]);
+  });
+
+  it('measures active time without the pauses longer than 30 minutes', () => {
+    const db = track(openMemoryDb());
+    const at = (minutes: number) => NOON + minutes * 60_000;
+    store(db, [
+      message({ dedupKey: 'a', timestamp: at(0) }),
+      message({ dedupKey: 'b', timestamp: at(10) }),
+      // Exactly 30 minutes still counts.
+      message({ dedupKey: 'c', timestamp: at(40) }),
+      // 31 minutes does not.
+      message({ dedupKey: 'd', timestamp: at(71) }),
+      message({ dedupKey: 'e', timestamp: at(76) }),
+      // The session is resumed two days later.
+      message({ dedupKey: 'f', timestamp: at(2 * 24 * 60) }),
+      message({ dedupKey: 'g', timestamp: at(2 * 24 * 60 + 3) }),
+      message({ dedupKey: 'solo', sessionId: 'one-response' }),
+    ]);
+    const session = (id: string) =>
+      db.raw
+        .prepare('SELECT active_ms, end_ts - start_ts AS span FROM sessions WHERE session_id = ?')
+        .get(id);
+    expect(session('s1')).toEqual({
+      active_ms: (10 + 30 + 5 + 3) * 60_000,
+      span: (2 * 24 * 60 + 3) * 60_000,
+    });
+    expect(session('one-response')).toEqual({ active_ms: 0, span: 0 });
+  });
+
+  it('upgrades a database created with the first schema', () => {
+    const file = path.join(tempDir(), 'usage.db');
+    const old = new Database(file);
+    const firstStep = MIGRATIONS[0];
+    if (!firstStep) throw new Error('missing first migration');
+    firstStep(old);
+    old.pragma('user_version = 1');
+    old.exec(`
+      INSERT INTO settings (key, value) VALUES ('machine_id', 'machine-1'), ('time_zone', 'UTC'), ('derived_dirty', '0');
+      INSERT INTO machines (id, name, platform, is_local) VALUES ('machine-1', 'studio', 'darwin', 1);
+      INSERT INTO files (path, root, project_folder, is_subagent, size, mtime_ms, read_offset, head_length, head_hash)
+        VALUES ('/logs/a.jsonl', '/logs', 'folder', 0, 900, 1, 900, 256, 'abc');
+    `);
+    const insert = old.prepare(
+      `INSERT INTO messages (dedup_key, ts, local_day, local_hour, session_id, project, model_id, model,
+                             kind, agent_id, input, output, cache_write, cache_read, stop_reason, rank)
+       VALUES (?, ?, '2026-11-10', 12, 's1', 'demo-app', 'claude-opus-5-5', 'Opus 5.5',
+               'main', NULL, 10, 5, 0, 100, 'end_turn', 4)`,
+    );
+    insert.run('a', NOON);
+    insert.run('b', NOON + 12 * 60_000);
+    old.close();
+
+    const db = track(new UsageDatabase(file, { timeZone: 'UTC' }));
+    expect(db.raw.pragma('user_version', { simple: true })).toBe(SCHEMA_VERSION);
+    expect(db.machineId).toBe('machine-1');
+    expect(db.raw.prepare('SELECT messages, active_ms FROM sessions').get()).toEqual({
+      messages: 2,
+      active_ms: 12 * 60_000,
+    });
+    expect(tokenTotal(db, 'hourly')).toBe(230);
+    // The file list is emptied so the next scan reads every transcript again and learns
+    // how the cache writes were split. The usage itself is kept.
+    expect(rowCount(db, 'files')).toBe(0);
+    expect(rowCount(db, 'messages')).toBe(2);
+    expect(db.raw.prepare('SELECT DISTINCT subfolder, cache_write_1h FROM messages').all()).toEqual(
+      [{ subfolder: '', cache_write_1h: 0 }],
+    );
+  });
+
+  it('records the subfolder a response was made in, also when a later copy brings it', () => {
+    const db = track(openMemoryDb());
+    const subfolder = () => db.raw.prepare('SELECT subfolder FROM messages').pluck().get();
+
+    store(db, [message({ dedupKey: 'a' })]);
+    expect(subfolder()).toBe('');
+    expect(store(db, [message({ dedupKey: 'a', subfolder: 'packages' })])).toMatchObject({
+      upgraded: 1,
+    });
+    expect(subfolder()).toBe('packages');
+    // A copy that knows less does not erase it.
+    expect(store(db, [message({ dedupKey: 'a' })])).toMatchObject({ duplicates: 1 });
+    expect(subfolder()).toBe('packages');
+    // A copy that belongs somewhere better brings its own.
+    store(db, [message({ dedupKey: 'b', subfolder: 'old', rank: RANK.copiedMain })]);
+    store(db, [message({ dedupKey: 'b', subfolder: 'src' })]);
+    expect(
+      db.raw.prepare("SELECT subfolder FROM messages WHERE dedup_key = 'b'").pluck().get(),
+    ).toBe('src');
+  });
+
+  it('records the 1-hour share of cache writes, also when a later copy brings it', () => {
+    const db = track(openMemoryDb());
+    const write = (cacheWrite1h: number) =>
+      message({
+        dedupKey: 'a',
+        tokens: { input: 1, output: 2, cacheWrite: 5000, cacheRead: 0 },
+        cacheWrite1h,
+      });
+    expect(store(db, [write(0)])).toMatchObject({ inserted: 1 });
+    // The same response read again, this time with the breakdown.
+    expect(store(db, [write(4000)])).toEqual({ inserted: 0, duplicates: 0, upgraded: 1 });
+    expect(store(db, [write(4000)])).toEqual({ inserted: 0, duplicates: 1, upgraded: 0 });
+
+    for (const table of ['messages', 'hourly', 'sessions']) {
+      expect(db.raw.prepare(`SELECT cache_write, cache_write_1h FROM ${table}`).get()).toEqual({
+        cache_write: 5000,
+        cache_write_1h: 4000,
+      });
+    }
+    // The 1-hour share is part of the cache writes, not an extra token type.
+    expect(tokenTotal(db, 'hourly')).toBe(5003);
   });
 
   it('classifies a subagent that never answered as a warm-up, until it does', () => {

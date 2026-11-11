@@ -63,6 +63,11 @@ export function formatTokens(value: number): string {
   return `${sign}${oneDecimalFormat.format(abs / 1_000_000_000)}B`;
 }
 
+/** Like `formatTokens` without a trailing `.0`, for axis labels: `50M`, `2.5M`. */
+export function formatTokensAxis(value: number): string {
+  return formatTokens(value).replace(/\.0(?=[MB]$)/, '');
+}
+
 /** Token count in thousands with a separator: `1080000` → `1,080k`. */
 export function formatTokensK(value: number): string {
   if (!Number.isFinite(value)) return PLACEHOLDER;
@@ -80,6 +85,8 @@ export function formatCost(value: number | null | undefined): string {
 interface PercentOptions {
   /** Prefix positive values with `+`, for changes between two periods. */
   signed?: boolean;
+  /** Keep one decimal at any size (`96.8%`), for shares that must visibly add up. */
+  precise?: boolean;
 }
 
 /** A ratio as a percentage: `0.46` → `46%`, `0.032` → `3.2%`. One decimal below 10%. */
@@ -87,7 +94,7 @@ export function formatPercent(ratio: number, options: PercentOptions = {}): stri
   if (!Number.isFinite(ratio)) return PLACEHOLDER;
   const percent = ratio * 100;
   const abs = Math.abs(percent);
-  const rounded = abs < 9.95 ? Math.round(abs * 10) / 10 : Math.round(abs);
+  const rounded = abs < 9.95 || options.precise ? Math.round(abs * 10) / 10 : Math.round(abs);
   const digits = Number.isInteger(rounded) ? rounded.toString() : rounded.toFixed(1);
   const sign = rounded === 0 ? '' : percent < 0 ? '-' : options.signed ? '+' : '';
   return `${sign}${digits}%`;

@@ -11,6 +11,7 @@ const api: Api = {
   platform: currentPlatform(),
   getAppInfo: () => ipcRenderer.invoke(IPC.getAppInfo),
   getMachines: () => ipcRenderer.invoke(IPC.getMachines),
+  getOverview: (filters) => ipcRenderer.invoke(IPC.getOverview, filters),
   onUsageUpdated: (callback) => {
     const listener = () => callback();
     ipcRenderer.on(IPC.usageUpdated, listener);

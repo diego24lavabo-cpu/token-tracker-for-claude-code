@@ -16,4 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Reading of Claude Code transcripts: recursive scan, deduplication of streamed and resumed responses, model names, project names.
 - Subagent detection: task, workflow and `/btw` transcripts, warm-up agents, agent types from meta files, and the legacy inline format.
 - Permanent local history in SQLite, with incremental reads and hourly, per-session and per-subagent aggregates in the local time zone.
+- Overview page: total, input and output tokens, estimated cost, tokens per day, and shortcut cards to every section, filtered by machine and period.
+- Cost estimate at API prices from an editable `pricing.json`, with 1-hour cache writes priced separately.
+- Active time for sessions and subagent runs: pauses longer than 30 minutes are left out.
 - Repository files: license, contribution guide, security policy, issue and pull request templates, CI workflow.

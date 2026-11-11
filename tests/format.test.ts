@@ -6,6 +6,7 @@ import {
   formatInt,
   formatPercent,
   formatTokens,
+  formatTokensAxis,
   formatTokensK,
 } from '../src/lib/format';
 
@@ -54,6 +55,16 @@ describe('formatTokens', () => {
   });
 });
 
+describe('formatTokensAxis', () => {
+  it('drops a trailing .0 and keeps real decimals', () => {
+    expect(formatTokensAxis(100_000_000)).toBe('100M');
+    expect(formatTokensAxis(50_000_000)).toBe('50M');
+    expect(formatTokensAxis(2_500_000)).toBe('2.5M');
+    expect(formatTokensAxis(875_000)).toBe('875k');
+    expect(formatTokensAxis(0)).toBe('0');
+  });
+});
+
 describe('formatTokensK', () => {
   it('expresses the count in thousands with a separator', () => {
     expect(formatTokensK(1_080_000)).toBe('1,080k');
@@ -90,6 +101,12 @@ describe('formatPercent', () => {
     expect(formatPercent(0.46)).toBe('46%');
     expect(formatPercent(0.968)).toBe('97%');
     expect(formatPercent(1)).toBe('100%');
+  });
+
+  it('keeps one decimal on request, so two shares visibly add up', () => {
+    expect(formatPercent(0.968, { precise: true })).toBe('96.8%');
+    expect(formatPercent(0.032, { precise: true })).toBe('3.2%');
+    expect(formatPercent(1, { precise: true })).toBe('100%');
   });
 
   it('adds a sign for changes between periods', () => {

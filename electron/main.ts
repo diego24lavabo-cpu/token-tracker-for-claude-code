@@ -4,10 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { IPC } from '../shared/ipc';
-import type { AppInfo, Machine, Platform } from '../shared/types';
+import type { AppInfo, Machine, Overview, Platform, Pricing } from '../shared/types';
+import { emptyOverview, getOverview, parseFilters } from './aggregate';
 import { UsageDatabase } from './db';
 import { installAppMenu } from './menu';
 import { defaultLogRoot, existingLogRoots, tildify } from './paths';
+import { DEFAULT_PRICING, loadPricing } from './pricing';
 import { formatSummary, scanLogs } from './scanner';
 
 const APP_ID = 'io.github.diego24lavabo-cpu.tokentracker';
@@ -30,6 +32,8 @@ let mainWindow: BrowserWindow | null = null;
 let database: UsageDatabase | null = null;
 let scanRunning = false;
 let quitting = false;
+/** Prices for the cost estimate, replaced by the user's `pricing.json` once it is read. */
+let pricing: Pricing = DEFAULT_PRICING;
 
 function currentPlatform(): Platform {
   if (process.platform === 'darwin' || process.platform === 'win32') return process.platform;
@@ -41,6 +45,7 @@ function openDatabase(): void {
   try {
     const folder = app.getPath('userData');
     fs.mkdirSync(folder, { recursive: true });
+    pricing = loadPricing(folder);
     database = new UsageDatabase(path.join(folder, DATABASE_FILE), {
       machineName: os.hostname(),
       platform: currentPlatform(),
@@ -154,13 +159,16 @@ function blockNetwork(): void {
 }
 
 /** Registers an IPC handler that only answers the main window's own page. */
-function handle<T>(channel: string, handler: (event: IpcMainInvokeEvent) => T | Promise<T>): void {
-  ipcMain.handle(channel, (event) => {
+function handle<T>(
+  channel: string,
+  handler: (event: IpcMainInvokeEvent, ...args: unknown[]) => T | Promise<T>,
+): void {
+  ipcMain.handle(channel, (event, ...args: unknown[]) => {
     const frame = event.senderFrame;
     if (!mainWindow || event.sender !== mainWindow.webContents || !frame || !isAppUrl(frame.url)) {
       throw new Error(`Rejected IPC call on "${channel}"`);
     }
-    return handler(event);
+    return handler(event, ...args);
   });
 }
 
@@ -175,6 +183,11 @@ function registerIpc(): void {
   }));
 
   handle<Machine[]>(IPC.getMachines, () => database?.listMachines() ?? []);
+
+  handle<Overview>(IPC.getOverview, (_event, input) => {
+    const filters = parseFilters(input);
+    return database ? getOverview(database, pricing, filters) : emptyOverview(filters);
+  });
 }
 
 if (!app.requestSingleInstanceLock()) {

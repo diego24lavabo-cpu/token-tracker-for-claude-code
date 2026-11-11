@@ -142,6 +142,15 @@ describe('scanning the macOS fixture', () => {
         .pluck()
         .get('msg_demo_main_004:req_demo_main_004'),
     ).toBe('demo-app');
+    // ...and the subfolder is remembered, should projects ever be split by it.
+    expect(
+      db.raw
+        .prepare('SELECT subfolder, COUNT(*) AS n FROM messages GROUP BY subfolder ORDER BY n')
+        .all(),
+    ).toEqual([
+      { subfolder: 'packages', n: 1 },
+      { subfolder: '', n: 21 },
+    ]);
     // A record without cwd takes the project of its session folder.
     expect(
       db.raw
@@ -183,6 +192,7 @@ describe('scanning the macOS fixture', () => {
         model: 'Sonnet 5.5',
         startTs: at('2026-11-09T09:01:00Z'),
         endTs: at('2026-11-09T09:02:00Z'),
+        activeMs: 60_000,
         calls: 2,
         startupInput: 610,
         tokens: { input: 14, output: 11, cacheWrite: 600, cacheRead: 600 },
@@ -196,6 +206,7 @@ describe('scanning the macOS fixture', () => {
         model: 'Sonnet 5.5',
         startTs: at('2026-11-09T09:03:00Z'),
         endTs: at('2026-11-09T09:04:00Z'),
+        activeMs: 60_000,
         calls: 2,
         startupInput: 97,
         tokens: { input: 8, output: 12, cacheWrite: 0, cacheRead: 180 },
@@ -209,6 +220,7 @@ describe('scanning the macOS fixture', () => {
         model: 'Haiku 5.5',
         startTs: noon('12:05:10'),
         endTs: noon('12:06:45'),
+        activeMs: 95_000,
         calls: 3,
         startupInput: 7030,
         tokens: { input: 40, output: 100, cacheWrite: 7200, cacheRead: 14200 },
@@ -222,6 +234,7 @@ describe('scanning the macOS fixture', () => {
         model: 'Sonnet 5.5',
         startTs: noon('12:07:00'),
         endTs: noon('12:07:00'),
+        activeMs: 0,
         calls: 1,
         startupInput: 3020,
         tokens: { input: 20, output: 15, cacheWrite: 3000, cacheRead: 0 },
@@ -235,6 +248,7 @@ describe('scanning the macOS fixture', () => {
         model: 'Haiku 5.5',
         startTs: noon('12:08:00'),
         endTs: noon('12:08:00'),
+        activeMs: 0,
         calls: 1,
         startupInput: 4008,
         tokens: { input: 8, output: 1, cacheWrite: 0, cacheRead: 4000 },
@@ -248,6 +262,7 @@ describe('scanning the macOS fixture', () => {
         model: 'Opus 5.5',
         startTs: noon('12:15:00'),
         endTs: noon('12:15:00'),
+        activeMs: 0,
         calls: 1,
         startupInput: 12015,
         tokens: { input: 15, output: 25, cacheWrite: 0, cacheRead: 12000 },
@@ -261,6 +276,7 @@ describe('scanning the macOS fixture', () => {
         model: 'Sonnet 5.5',
         startTs: noon('12:30:00'),
         endTs: noon('12:31:00'),
+        activeMs: 60_000,
         calls: 2,
         startupInput: 2112,
         tokens: { input: 18, output: 52, cacheWrite: 2100, cacheRead: 2100 },
@@ -380,7 +396,7 @@ describe('scanning the macOS fixture', () => {
     const sessions = db.raw
       .prepare(
         `SELECT session_id, project, model, start_ts, end_ts, start_day, messages,
-                input, output, cache_write, cache_read, subagent_count, subagent_tokens
+                input, output, cache_write, cache_read, subagent_count, subagent_tokens, active_ms
          FROM sessions ORDER BY start_ts`,
       )
       .all();
@@ -399,6 +415,8 @@ describe('scanning the macOS fixture', () => {
         cache_read: 2880,
         subagent_count: 2,
         subagent_tokens: 1425,
+        // 09:00 to 09:10 without a long pause.
+        active_ms: 10 * 60_000,
       },
       {
         session_id: S1,
@@ -416,6 +434,8 @@ describe('scanning the macOS fixture', () => {
         // Explore, the agent without meta, /btw and the workflow agent. Not the warm-up.
         subagent_count: 4,
         subagent_tokens: 44894,
+        // Active time follows every response of the session, subagents included: 12:00 to 12:31.
+        active_ms: 31 * 60_000,
       },
       {
         session_id: S3,
@@ -431,6 +451,7 @@ describe('scanning the macOS fixture', () => {
         cache_read: 998,
         subagent_count: 0,
         subagent_tokens: 0,
+        active_ms: 20 * 60_000,
       },
     ]);
   });
@@ -496,6 +517,7 @@ describe('scanning the Windows fixture', () => {
         model: 'Sonnet 5.5',
         startTs: at('2026-11-08T10:02:00Z'),
         endTs: at('2026-11-08T10:02:00Z'),
+        activeMs: 0,
         calls: 1,
         startupInput: 189,
         tokens: { input: 9, output: 11, cacheWrite: 180, cacheRead: 0 },

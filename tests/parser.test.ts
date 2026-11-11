@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   encodeProjectPath,
+  locateInSessionFolder,
   modelDisplayName,
   parseLine,
   projectNameFromCwd,
@@ -45,7 +46,30 @@ describe('parseLine', () => {
       agentId: null,
       stopReason: 'tool_use',
       tokens: { input: 1234, output: 567, cacheWrite: 8900, cacheRead: 45000 },
+      cacheWrite1h: 0,
     });
+  });
+
+  it('reads how much of the cache write went to the 1-hour cache', () => {
+    const split = usage(assistantLine({ id: 'a', u: [1, 2, 5000, 0], cache1h: 4000 }));
+    expect(split.tokens.cacheWrite).toBe(5000);
+    expect(split.cacheWrite1h).toBe(4000);
+
+    expect(usage(assistantLine({ id: 'b', u: [1, 2, 5000, 0], cache1h: 5000 })).cacheWrite1h).toBe(
+      5000,
+    );
+    expect(usage(assistantLine({ id: 'c', u: [1, 2, 5000, 0], cache1h: 0 })).cacheWrite1h).toBe(0);
+
+    // It can never exceed the total written.
+    const inconsistent = custom(
+      (_, message) =>
+        (message.usage = {
+          output_tokens: 2,
+          cache_creation_input_tokens: 100,
+          cache_creation: { ephemeral_1h_input_tokens: 900 },
+        }),
+    );
+    expect(usage(inconsistent).cacheWrite1h).toBe(100);
   });
 
   it('reads the subagent markers', () => {
@@ -303,6 +327,26 @@ describe('project names', () => {
         'C--Users-alex-dev-demo-app',
       ),
     ).toBe('demo-app');
+  });
+
+  it('tells which directory under the project a cwd is in', () => {
+    const folder = '-Users-alex-dev-demo-app';
+    expect(locateInSessionFolder(MAC_CWD, folder)).toEqual({ project: 'demo-app', subfolder: '' });
+    expect(locateInSessionFolder(`${MAC_CWD}/packages`, folder)).toEqual({
+      project: 'demo-app',
+      subfolder: 'packages',
+    });
+    expect(locateInSessionFolder(`${MAC_CWD}/packages/web/src`, folder)).toEqual({
+      project: 'demo-app',
+      subfolder: 'packages',
+    });
+    expect(
+      locateInSessionFolder(
+        'C:\\Users\\alex\\dev\\demo-app\\src\\ui',
+        'C--Users-alex-dev-demo-app',
+      ),
+    ).toEqual({ project: 'demo-app', subfolder: 'src' });
+    expect(locateInSessionFolder('/Users/alex/dev/scratch-pad', folder)).toBeNull();
   });
 
   it('reads Windows paths on any platform, ignoring case', () => {
