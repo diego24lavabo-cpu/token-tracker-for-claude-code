@@ -66,6 +66,18 @@ export const en = {
 
   titleBar: {
     localOnly: 'Local only',
+    synced: (machines: number, ago: string) =>
+      `Google Drive · ${machines === 1 ? '1 machine' : `${machines} machines`} · synced ${ago}`,
+    notYet: 'Google Drive · not synced yet',
+    pending: 'Sync pending · Google Drive not reachable',
+    needsFolder: 'Sync on · choose a Google Drive folder in Settings',
+    offWithMachines: (machines: number) => `Sync off · ${machines} machines`,
+  },
+
+  platforms: {
+    darwin: 'macOS',
+    win32: 'Windows',
+    linux: 'Linux',
   },
 
   source: {
@@ -120,6 +132,8 @@ export const en = {
       invocations: (count: number, formatted: string) =>
         count === 1 ? '1 invocation' : `${formatted} invocations`,
       localOnly: 'Local only',
+      syncedAgo: (ago: string) => `synced ${ago}`,
+      syncPending: 'sync pending',
     },
     empty: {
       title: 'No usage found yet',
@@ -540,6 +554,38 @@ export const en = {
     },
   },
 
+  machines: {
+    machinesIgnored: 'The Machines page always compares every machine',
+    thisMachine: 'this machine',
+    activeDays: 'Active days',
+    sessions: 'Sessions',
+    projectCount: 'Projects',
+    cost: 'Est. cost',
+    syncedAgo: (ago: string) => `Synced ${ago}`,
+    notSynced: 'Not synced yet',
+    localOnly: 'Local only · sync is off',
+    stale: (days: number) => `No sync for ${days} days`,
+    staleHint:
+      'Its numbers may be out of date: open the app on that computer and check Google Drive.',
+    weekly: {
+      title: 'Per week',
+      versus: (names: string[]) => `${names.join(' vs ')} · per week`,
+      chartLabel: 'Tokens per week, one bar per machine',
+      weekOf: (day: string) => `Week of ${day}`,
+    },
+    projects: {
+      title: 'Projects by machine',
+      chartLabel: 'The largest projects of the period, split by machine',
+      more: (count: number) => (count === 1 ? '1 more project' : `${count} more projects`),
+      empty: 'No usage in this period',
+    },
+    single: {
+      title: 'Only this computer so far',
+      body: 'Turn on sync in Settings to add your other computers: each one writes its numbers to Google Drive and reads the others’. This page then compares them.',
+      action: 'Open Settings',
+    },
+  },
+
   charts: {
     hour: (hour: number) => `${hour}h`,
     hourRange: (hour: number) =>
@@ -599,6 +645,7 @@ export const en = {
       retentionHint: (file: string) =>
         `Claude Code deletes old session transcripts (cleanupPeriodDays in ${file}). This app keeps its own copy of everything it has read, so only what it never scanned can be lost.`,
       keepLonger: 'Keep Claude Code history longer…',
+      keepLongerFor: 'Keep transcripts for',
       keepLongerDone: 'Claude Code will keep its transcripts longer from its next start.',
     },
     containers: {
@@ -612,11 +659,71 @@ export const en = {
     },
     sync: {
       title: 'Sync',
+      toggle: 'Sync through Google Drive',
+      explain:
+        'Combine the usage of your computers through Google Drive for desktop. Each computer writes its own numbers to My Drive/ClaudeTokenTracker and reads the others’. No Google account access, no server: only files in your local Drive folder.',
+      whatTitle: 'What is written to Drive',
+      what: 'Aggregated numbers only: days and hours, project names (folder names, never paths), model names, agent types and token counts, plus this computer’s name.',
+      never: 'Never prompts, responses, code, subagent descriptions or file paths.',
       status: 'Status',
-      off: 'Local only',
-      thisMachine: 'This machine',
-      knownMachines: 'Known machines',
-      hint: 'Sync between computers through Google Drive comes in a later version.',
+      statusOff: 'Off: this computer only',
+      statusSynced: (ago: string) => `Synced ${ago}`,
+      statusNotYet: 'Not synced yet',
+      statusPending: 'Pending: the Google Drive folder cannot be reached',
+      statusPendingHint:
+        'Check that Google Drive for desktop is running. Usage is kept and written later.',
+      statusNeedsFolder: 'Choose a Google Drive folder',
+      folder: 'Folder',
+      folderPicked: 'Chosen by hand',
+      change: 'Change…',
+      chooseFolder: 'Choose folder…',
+      severalFound: 'Several Google Drive accounts were found. Sync through:',
+      accountsFound: 'Google Drive accounts on this computer:',
+      noneFound:
+        'Google Drive for desktop was not found. Install it and sign in, or choose a folder that Google Drive syncs.',
+      useCandidate: (folder: string) => `Sync through ${folder}`,
+      machineName: 'This computer’s name',
+      machineNameHint: 'As the other computers show it',
+      save: 'Save',
+      saved: 'Name saved.',
+      knownMachines: 'Machines',
+      thisMachine: 'this computer',
+      hidden: 'Hidden',
+      syncedAgo: (ago: string) => `synced ${ago}`,
+      neverSynced: 'never synced',
+      stale: (days: number) => `no sync for ${days} days`,
+      problems: {
+        newerVersion: 'needs a newer version of the app',
+        unreadable: 'last file unreadable, older copy kept',
+        missing: 'not in the sync folder any more',
+      },
+      conflicts: (count: number) =>
+        count === 1 ? '1 conflict copy ignored' : `${count} conflict copies ignored`,
+      remove: (name: string) => `Remove ${name}`,
+      restore: 'Show again',
+      syncNow: 'Sync now',
+      syncing: 'Syncing…',
+      synced: 'Synced.',
+      noMachinesYet: 'No other computer has synced yet.',
+    },
+    aliases: {
+      title: 'Project aliases',
+      hint: 'After renaming a project folder, map the old name to the new one: usage under the old name, on every computer, is then counted under the new name. Subfolders of a container folder follow, and a container flag set on the old name is kept.',
+      example: 'Example: VS Code → Code turns VS Code › website into Code › website.',
+      empty: 'No aliases yet.',
+      from: 'Old name',
+      to: 'New name',
+      add: 'Add',
+      remove: (from: string, to: string) => `Remove the alias ${from} → ${to}`,
+      applying: 'Applying…',
+      problems: {
+        empty: 'Fill in both names.',
+        same: 'The two names are the same.',
+        duplicate: 'This old name already has an alias.',
+        cycle: 'This alias would lead back to the old name.',
+        tooLong: 'A name can have at most 1,000 characters.',
+        tooMany: 'At most 500 aliases.',
+      },
     },
     app: {
       title: 'Application',
@@ -698,8 +805,20 @@ export const en = {
         `Claude Code currently deletes session transcripts after ${current} days. This sets "cleanupPeriodDays": ${days} in ${file}. Every other setting in that file is kept. Claude Code applies it the next time it starts. Transcripts use disk space in your Claude folder.`,
       confirm: 'Change the setting',
       cancel: 'Cancel',
-      unreadable: (file: string) =>
-        `${file} is not valid JSON, so the app does not change it. Add "cleanupPeriodDays": 365 to it by hand.`,
+      unreadable: (file: string, days: number) =>
+        `${file} is not valid JSON, so the app does not change it. Add "cleanupPeriodDays": ${days} to it by hand.`,
+    },
+    pickSyncFolder: {
+      title: 'Choose your Google Drive folder',
+      button: 'Sync through this folder',
+    },
+    removeMachine: {
+      message: (name: string) => `Remove ${name}?`,
+      detail:
+        'Its usage disappears from every page on this computer. You can show it again from Settings. Deleting its files also removes it from your other computers, until it syncs again.',
+      hide: 'Remove',
+      hideAndDelete: 'Remove and delete its files from Drive',
+      cancel: 'Cancel',
     },
   },
 

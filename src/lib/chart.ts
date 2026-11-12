@@ -33,6 +33,25 @@ export function seriesColor(index: number): string {
   ]!;
 }
 
+/**
+ * Colors of the machines, in the order of the Machines page cards: the design system
+ * gives `--accent-dark` to the second machine.
+ */
+const MACHINE_COLORS = [
+  CHART_COLORS.accent,
+  CHART_COLORS.accentDark,
+  CHART_COLORS.accentLight,
+  CHART_COLORS.accentPale,
+  CHART_COLORS.heat3,
+  CHART_COLORS.heat1,
+] as const;
+
+export function machineColor(index: number): string {
+  return MACHINE_COLORS[
+    ((index % MACHINE_COLORS.length) + MACHINE_COLORS.length) % MACHINE_COLORS.length
+  ]!;
+}
+
 /** Axis labels: small, muted, in the mono face like every number. */
 export const AXIS_TICK = { fill: CHART_COLORS.axis, fontSize: 11, fontFamily: 'var(--font-mono)' };
 

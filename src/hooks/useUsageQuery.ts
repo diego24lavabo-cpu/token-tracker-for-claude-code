@@ -19,8 +19,13 @@ export interface UsageQuery<T> {
  * `fetcher` must keep its identity between renders (wrap it in `useCallback`): a new
  * identity means "the question changed".
  */
-export function useUsageQuery<T>(fetcher: () => Promise<T>): UsageQuery<T> {
+export function useUsageQuery<T>(
+  fetcher: () => Promise<T>,
+  /** Also loads again when the sync status changes, for a page that shows it. */
+  options: { syncStatus?: boolean } = {},
+): UsageQuery<T> {
   const [state, setState] = useState<QueryState<T>>({ source: null, data: null, failed: false });
+  const syncStatus = options.syncStatus === true;
 
   useEffect(() => {
     let cancelled = false;
@@ -39,11 +44,13 @@ export function useUsageQuery<T>(fetcher: () => Promise<T>): UsageQuery<T> {
 
     load();
     const unsubscribe = window.api.onUsageUpdated(load);
+    const unsubscribeSync = syncStatus ? window.api.onSyncUpdated(load) : () => undefined;
     return () => {
       cancelled = true;
       unsubscribe();
+      unsubscribeSync();
     };
-  }, [fetcher]);
+  }, [fetcher, syncStatus]);
 
   return { data: state.data, loading: state.source !== fetcher, failed: state.failed };
 }

@@ -21,6 +21,9 @@ import type {
   HeatLevel,
   HeatmapDay,
   HeatmapWeek,
+  MachineCard,
+  MachineProject,
+  MachinesDetail,
   MonthPoint,
   Filters,
   MainSubagentPoint,
@@ -1036,16 +1039,15 @@ export function getCalendar(
     )
     .all(...where.params) as { day: string; tokens: number }[];
   // Sessions with activity that day, subagents included, so a session that runs past
-  // midnight counts on both days. `messages` holds this machine's responses only.
-  const sessionRows =
-    !machineIds || machineIds.includes(db.machineId)
-      ? (raw
-          .prepare(
-            `SELECT local_day AS day, COUNT(DISTINCT session_id) AS count FROM messages
-             WHERE local_day BETWEEN ? AND ? GROUP BY local_day`,
-          )
-          .all(from, to) as { day: string; count: number }[])
-      : [];
+  // midnight counts on both days. One row per machine, session and day.
+  const dayWhere: Where = { sql: 'local_day BETWEEN ? AND ?', params: [from, to] };
+  inList('machine_id', machineIds, dayWhere);
+  const sessionRows = raw
+    .prepare(
+      `SELECT local_day AS day, COUNT(*) AS count FROM session_days
+       WHERE ${dayWhere.sql} GROUP BY local_day`,
+    )
+    .all(...dayWhere.params) as { day: string; count: number }[];
 
   const tokensByDay = new Map(dayRows.map((row) => [row.day, row.tokens]));
   const sessionsByDay = new Map(sessionRows.map((row) => [row.day, row.count]));
@@ -1215,16 +1217,16 @@ export function parseSessionKey(
  * Condition on `sessions s` for the Sessions page. Without a day, a session counts on its
  * start day, like every session count. With a day, the sessions with activity that day
  * count, subagents included, as the Calendar shows them: a session that runs past
- * midnight is on both days. `messages` holds this machine's responses only, so other
- * machines have no sessions by day until sync carries them.
+ * midnight is on both days.
  * `lists` = false leaves out the project and model filters, for the filter menus.
  */
-function sessionsWhere(db: UsageDatabase, filters: SessionFilters, lists = true): Where {
+function sessionsWhere(filters: SessionFilters, lists = true): Where {
   const where: Where = filters.day
     ? {
-        sql: `s.machine_id = ? AND s.session_id IN (
-                SELECT session_id FROM messages WHERE local_day = ?)`,
-        params: [db.machineId, filters.day],
+        sql: `EXISTS (SELECT 1 FROM session_days d
+                      WHERE d.machine_id = s.machine_id AND d.session_id = s.session_id
+                        AND d.local_day = ?)`,
+        params: [filters.day],
       }
     : { sql: 's.start_day BETWEEN ? AND ?', params: [filters.from, filters.to] };
   inList('s.machine_id', filters.machineIds, where);
@@ -1275,9 +1277,8 @@ const sessionKey = (machineId: string, sessionId: string) => `${machineId}\n${se
 type CostResult = { cost: number | null; costIsPartial: boolean };
 
 /**
- * The estimated cost of sessions, keyed by `sessionKey`. This machine's sessions are
- * priced model by model from their responses; a session of another machine only has its
- * main model, which then prices all its tokens.
+ * The estimated cost of sessions, keyed by `sessionKey`, priced model by model from the
+ * session's tokens per model, whichever machine it ran on.
  */
 function sessionCosts(
   db: UsageDatabase,
@@ -1286,26 +1287,27 @@ function sessionCosts(
   where: Where,
 ): Map<string, CostResult> {
   const byModel = new Map<string, ModelTotals[]>();
-  const local = db.raw
+  const models = db.raw
     .prepare(
-      `SELECT session_id, ${MODEL_TOTALS} FROM messages
-       WHERE session_id IN (SELECT s.session_id FROM sessions s
-                            WHERE ${where.sql} AND s.machine_id = ?)
-       GROUP BY session_id, model`,
+      `SELECT sm.machine_id, sm.session_id, sm.model, sm.input, sm.output, sm.cache_write,
+              sm.cache_read, sm.cache_write_1h
+       FROM session_models sm
+       JOIN sessions s ON s.machine_id = sm.machine_id AND s.session_id = sm.session_id
+       WHERE ${where.sql}`,
     )
-    .all(...where.params, db.machineId) as (ModelTotals & { session_id: string })[];
-  for (const row of local) {
-    const list = byModel.get(row.session_id) ?? [];
+    .all(...where.params) as (ModelTotals & { machine_id: string; session_id: string })[];
+  for (const row of models) {
+    const key = sessionKey(row.machine_id, row.session_id);
+    const list = byModel.get(key) ?? [];
     list.push(row);
-    byModel.set(row.session_id, list);
+    byModel.set(key, list);
   }
 
   const costs = new Map<string, CostResult>();
   for (const row of rows) {
-    const models = (row.machine_id === db.machineId ? byModel.get(row.session_id) : undefined) ?? [
-      row,
-    ];
-    costs.set(sessionKey(row.machine_id, row.session_id), costOfModels(pricing, models));
+    const key = sessionKey(row.machine_id, row.session_id);
+    // Without its models (never expected), the main model prices all its tokens.
+    costs.set(key, costOfModels(pricing, byModel.get(key) ?? [row]));
   }
   return costs;
 }
@@ -1389,7 +1391,7 @@ export function getSessions(
   sort: SessionSort,
 ): Sessions {
   const raw = db.raw;
-  const where = sessionsWhere(db, filters);
+  const where = sessionsWhere(filters);
   const dbRows = raw
     .prepare(
       `SELECT ${SESSION_COLUMNS}
@@ -1441,7 +1443,7 @@ export function getSessions(
   const shown = Math.min(page, lastPage);
 
   // The filter menus list what the period offers, whatever is picked in them.
-  const scope = sessionsWhere(db, filters, false);
+  const scope = sessionsWhere(filters, false);
   const projects = raw
     .prepare(
       `SELECT DISTINCT sp.project FROM session_projects sp
@@ -1670,30 +1672,24 @@ const SUBAGENT_MODEL_TOTALS = (p: string) => `SUM(${p}.input) AS input, SUM(${p}
   SUM(${p}.cache_write_1h) AS cache_write_1h`;
 
 /**
- * Tokens per agent type, kind and model, to price each type and find its main model.
- * This machine's runs are split model by model from their responses; a run of another
- * machine only has its main model, which then gets all its tokens.
+ * Tokens per agent type, kind and model, to price each type and find its main model,
+ * from each run's tokens per model, whichever machine it ran on.
  */
 function agentTypeModels(db: UsageDatabase, where: Where): Map<string, Map<string, ModelTotals>> {
-  const local = db.raw
+  const rows = db.raw
     .prepare(
       `SELECT s.agent_type, s.kind, m.model, ${SUBAGENT_MODEL_TOTALS('m')}
        FROM subagents s
-       JOIN messages m ON m.session_id = s.session_id AND m.agent_id = s.agent_id
-       WHERE ${where.sql} AND s.machine_id = ?
+       JOIN subagent_models m
+         ON m.machine_id = s.machine_id AND m.session_id = s.session_id
+        AND m.agent_id = s.agent_id
+       WHERE ${where.sql}
        GROUP BY s.agent_type, s.kind, m.model`,
     )
-    .all(...where.params, db.machineId);
-  const others = db.raw
-    .prepare(
-      `SELECT s.agent_type, s.kind, s.model, ${SUBAGENT_MODEL_TOTALS('s')}
-       FROM subagents s WHERE ${where.sql} AND s.machine_id <> ?
-       GROUP BY s.agent_type, s.kind, s.model`,
-    )
-    .all(...where.params, db.machineId);
+    .all(...where.params);
 
   const byType = new Map<string, Map<string, ModelTotals>>();
-  for (const row of [...local, ...others] as (ModelTotals & {
+  for (const row of rows as (ModelTotals & {
     agent_type: string;
     kind: SubagentKind;
   })[]) {
@@ -1918,6 +1914,146 @@ export function getAgents(db: UsageDatabase, pricing: Pricing, filters: Filters)
       main: modelsOf(true),
       subagents: modelsOf(false),
     },
+  };
+}
+
+// ── Machines ──────────────────────────────────────────────────────────────────
+
+/** Rows of the "Projects by machine" chart. */
+export const MACHINE_PROJECTS = 10;
+
+/**
+ * The Machines page: one card per machine of the machine selector, tokens per week and
+ * machine, and the largest projects split by machine. The machine filter does not apply:
+ * the page compares every machine. The period does.
+ */
+export function getMachinesDetail(
+  db: UsageDatabase,
+  pricing: Pricing,
+  filters: Filters,
+): MachinesDetail {
+  const raw = db.raw;
+  const all: Filters = { ...filters, machineIds: undefined };
+  const where = hourlyWhere(all);
+  const machines = db.listMachines();
+
+  const modelRows = raw
+    .prepare(
+      `SELECT machine_id, ${MODEL_TOTALS} FROM hourly WHERE ${where.sql}
+       GROUP BY machine_id, model`,
+    )
+    .all(...where.params) as (ModelTotals & { machine_id: string })[];
+  const countRows = raw
+    .prepare(
+      `SELECT machine_id,
+              COUNT(DISTINCT CASE WHEN ${TOKENS} > 0 THEN local_day END) AS active_days,
+              COUNT(DISTINCT CASE WHEN ${TOKENS} > 0 THEN project END) AS projects
+       FROM hourly WHERE ${where.sql} GROUP BY machine_id`,
+    )
+    .all(...where.params) as { machine_id: string; active_days: number; projects: number }[];
+  const started = startDayWhere(all);
+  const sessionRows = raw
+    .prepare(
+      `SELECT machine_id, COUNT(*) AS count FROM sessions WHERE ${started.sql}
+       GROUP BY machine_id`,
+    )
+    .all(...started.params) as { machine_id: string; count: number }[];
+
+  const modelsOf = new Map<string, ModelTotals[]>();
+  for (const row of modelRows) {
+    const list = modelsOf.get(row.machine_id) ?? [];
+    list.push(row);
+    modelsOf.set(row.machine_id, list);
+  }
+  const counts = new Map(countRows.map((row) => [row.machine_id, row]));
+  const sessions = new Map(sessionRows.map((row) => [row.machine_id, row.count]));
+
+  const sized = machines.map((machine) => {
+    const models = modelsOf.get(machine.id) ?? [];
+    const tokens = models.reduce(
+      (sum, row) => sum + row.input + row.output + row.cache_write + row.cache_read,
+      0,
+    );
+    return { machine, models, tokens };
+  });
+  sized.sort(
+    (a, b) =>
+      Number(b.machine.isLocal) - Number(a.machine.isLocal) ||
+      b.tokens - a.tokens ||
+      collator.compare(a.machine.name, b.machine.name),
+  );
+  const totalTokens = sized.reduce((sum, item) => sum + item.tokens, 0);
+
+  const cards: MachineCard[] = sized.map(({ machine, models, tokens }) => ({
+    id: machine.id,
+    name: machine.name,
+    platform: machine.platform,
+    isLocal: machine.isLocal,
+    lastSync: machine.lastSync,
+    tokens,
+    share: ratio(tokens, totalTokens),
+    activeDays: counts.get(machine.id)?.active_days ?? 0,
+    sessions: sessions.get(machine.id) ?? 0,
+    projects: counts.get(machine.id)?.projects ?? 0,
+    ...costOfModels(pricing, models),
+  }));
+  const cardIndex = new Map(cards.map((card, index) => [card.id, index]));
+
+  // Tokens per week and machine, over the same 12 weeks as the Models page.
+  const weeks = lastWeeks(filters.to, WEEKLY_WEEKS);
+  const weekWhere = hourlyWhere({ ...all, from: weeks[0]!, to: addDays(weeks.at(-1)!, 6) });
+  const weekRows = raw
+    .prepare(
+      `SELECT local_day AS day, machine_id, SUM(${TOKENS}) AS tokens
+       FROM hourly WHERE ${weekWhere.sql} GROUP BY local_day, machine_id`,
+    )
+    .all(...weekWhere.params) as { day: string; machine_id: string; tokens: number }[];
+  const weekIndex = new Map(weeks.map((week, index) => [week, index]));
+  const weekly = weeks.map((week) => ({ week, tokens: cards.map(() => 0) }));
+  for (const row of weekRows) {
+    const point = weekly[weekIndex.get(weekStart(row.day)) ?? -1];
+    const machine = cardIndex.get(row.machine_id);
+    if (point && machine !== undefined) point.tokens[machine]! += row.tokens;
+  }
+
+  // The largest projects, split by machine.
+  const projectRows = raw
+    .prepare(
+      `SELECT project, machine_id, SUM(${TOKENS}) AS tokens
+       FROM hourly WHERE ${where.sql} GROUP BY project, machine_id HAVING tokens > 0`,
+    )
+    .all(...where.params) as { project: string; machine_id: string; tokens: number }[];
+  const byProject = new Map<string, MachineProject>();
+  for (const row of projectRows) {
+    const machine = cardIndex.get(row.machine_id);
+    if (machine === undefined) continue;
+    let project = byProject.get(row.project);
+    if (!project) {
+      project = { name: row.project, tokens: 0, machines: cards.map(() => 0) };
+      byProject.set(row.project, project);
+    }
+    project.tokens += row.tokens;
+    project.machines[machine]! += row.tokens;
+  }
+  const projects = [...byProject.values()].sort(byTokens);
+
+  return {
+    hasData: hasAnyUsage(db),
+    cards,
+    weekly,
+    projects: projects.slice(0, MACHINE_PROJECTS),
+    moreProjects: Math.max(0, projects.length - MACHINE_PROJECTS),
+  };
+}
+
+/** What the Machines page shows when there is no database to read. */
+export function emptyMachinesDetail(filters: Filters): MachinesDetail {
+  return {
+    hasData: false,
+    cards: [],
+    weekly: lastWeeks(filters.to, WEEKLY_WEEKS).map((week) => ({ week, tokens: [] })),
+    projects: [],
+    moreProjects: 0,
   };
 }
 

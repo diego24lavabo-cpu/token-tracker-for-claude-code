@@ -21,6 +21,13 @@ const api: Api = {
   getSessionDetail: (machineId, sessionId) =>
     ipcRenderer.invoke(IPC.getSessionDetail, machineId, sessionId),
   getAgents: (filters) => ipcRenderer.invoke(IPC.getAgents, filters),
+  getMachinesDetail: (filters) => ipcRenderer.invoke(IPC.getMachinesDetail, filters),
+  getSyncStatus: () => ipcRenderer.invoke(IPC.getSyncStatus),
+  chooseSyncFolder: () => ipcRenderer.invoke(IPC.chooseSyncFolder),
+  useSyncFolder: (folder) => ipcRenderer.invoke(IPC.useSyncFolder, folder),
+  syncNow: () => ipcRenderer.invoke(IPC.syncNow),
+  removeMachine: (machineId) => ipcRenderer.invoke(IPC.removeMachine, machineId),
+  restoreMachine: (machineId) => ipcRenderer.invoke(IPC.restoreMachine, machineId),
   getSettings: () => ipcRenderer.invoke(IPC.getSettings),
   setSettings: (patch) => ipcRenderer.invoke(IPC.setSettings, patch),
   addLogFolder: () => ipcRenderer.invoke(IPC.addLogFolder),
@@ -28,12 +35,19 @@ const api: Api = {
   scanNow: () => ipcRenderer.invoke(IPC.scanNow),
   exportCsv: (kind, filters) => ipcRenderer.invoke(IPC.exportCsv, kind, filters),
   rebuildDatabase: () => ipcRenderer.invoke(IPC.rebuildDatabase),
-  keepHistoryLonger: () => ipcRenderer.invoke(IPC.keepHistoryLonger),
+  keepHistoryLonger: (days) => ipcRenderer.invoke(IPC.keepHistoryLonger, days),
   onUsageUpdated: (callback) => {
     const listener = () => callback();
     ipcRenderer.on(IPC.usageUpdated, listener);
     return () => {
       ipcRenderer.removeListener(IPC.usageUpdated, listener);
+    };
+  },
+  onSyncUpdated: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on(IPC.syncUpdated, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC.syncUpdated, listener);
     };
   },
 };

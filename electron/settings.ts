@@ -2,15 +2,27 @@
  * App preferences kept in the database's `settings` table, the container folder
  * candidates shown in Settings, and the checks on changes sent by the UI.
  */
+import {
+  aliasMap,
+  aliasProblem,
+  containerTargets,
+  MAX_ALIASES,
+  resolveAlias,
+  type ProjectAlias,
+} from '../shared/projects';
 import type { ContainerCandidate, CsvKind, SettingsPatch } from '../shared/types';
 import { InvalidRequestError } from './aggregate';
+import { CLEANUP_CHOICES } from './claudeSettings';
 import { CSV_KINDS } from './csv';
 import type { UsageDatabase } from './db';
 import { validatePricing } from './pricing';
+import { isMachineId } from './syncFormat';
 
 const SETTING_FILE_WATCHING = 'file_watching';
 const SETTING_EXTRA_ROOTS = 'extra_log_roots';
 
+const MAX_MACHINE_NAME = 60;
+const MAX_KNOWN_PROJECTS = 2_000;
 const MAX_CONTAINERS = 500;
 const MAX_NAME_LENGTH = 1_000;
 const MAX_PATH_LENGTH = 4_096;
@@ -46,19 +58,25 @@ export function setExtraLogRoots(db: UsageDatabase, roots: readonly string[]): v
 /**
  * Folder projects that may hold several projects: those with usage in subfolders, plus
  * the ones already flagged. Flagged first, then by the tokens used in subfolders.
+ * A folder renamed by an alias is one candidate under its new name: a flag set on the
+ * old name applies to it, and turning it off clears both.
  */
 export function getContainerCandidates(db: UsageDatabase): ContainerCandidate[] {
-  const flagged = new Set(db.getContainerProjects());
+  const aliases = aliasMap(db.getProjectAliases());
+  const flagged = containerTargets(db.getContainerProjects(), aliases);
   const byProject = new Map<string, { tokens: number; subfolders: Map<string, number> }>();
 
   for (const row of db.folderUsage()) {
-    let entry = byProject.get(row.project);
+    const name = resolveAlias(row.project, aliases);
+    let entry = byProject.get(name);
     if (!entry) {
       entry = { tokens: 0, subfolders: new Map() };
-      byProject.set(row.project, entry);
+      byProject.set(name, entry);
     }
     entry.tokens += row.tokens;
-    if (row.subfolder !== '') entry.subfolders.set(row.subfolder, row.tokens);
+    if (row.subfolder !== '') {
+      entry.subfolders.set(row.subfolder, (entry.subfolders.get(row.subfolder) ?? 0) + row.tokens);
+    }
   }
   for (const name of flagged) {
     if (!byProject.has(name)) byProject.set(name, { tokens: 0, subfolders: new Map() });
@@ -125,7 +143,73 @@ export function parseSettingsPatch(value: unknown): SettingsPatch {
       throw new InvalidRequestError(error instanceof Error ? error.message : 'invalid pricing');
     }
   }
+
+  if (input.projectAliases !== undefined) {
+    patch.projectAliases = parseProjectAliases(input.projectAliases);
+  }
+
+  if (input.syncEnabled !== undefined) {
+    if (typeof input.syncEnabled !== 'boolean') {
+      throw new InvalidRequestError('syncEnabled must be a boolean');
+    }
+    patch.syncEnabled = input.syncEnabled;
+  }
+
+  if (input.machineName !== undefined) {
+    const name = typeof input.machineName === 'string' ? input.machineName.trim() : '';
+    if (name.length === 0 || name.length > MAX_MACHINE_NAME) {
+      throw new InvalidRequestError(`machineName must have 1 to ${MAX_MACHINE_NAME} characters`);
+    }
+    patch.machineName = name;
+  }
   return patch;
+}
+
+/**
+ * Checks a list of aliases received over IPC: trimmed names, at most one alias per old
+ * name, and no cycle. Adding them one by one must pass `aliasProblem`.
+ */
+export function parseProjectAliases(value: unknown): ProjectAlias[] {
+  if (!Array.isArray(value) || value.length > MAX_ALIASES) {
+    throw new InvalidRequestError('projectAliases must be a list');
+  }
+  const list: ProjectAlias[] = [];
+  for (const item of value) {
+    const from = typeof item?.from === 'string' ? item.from.trim() : '';
+    const to = typeof item?.to === 'string' ? item.to.trim() : '';
+    const problem = aliasProblem(list, from, to);
+    if (problem) throw new InvalidRequestError(`invalid alias "${from}" → "${to}": ${problem}`);
+    list.push({ from, to });
+  }
+  return list;
+}
+
+/** Checks the days asked for by "Keep Claude Code history longer". */
+export function parseCleanupDays(value: unknown): number {
+  if (typeof value !== 'number' || !CLEANUP_CHOICES.includes(value)) {
+    throw new InvalidRequestError(`days must be one of ${CLEANUP_CHOICES.join(', ')}`);
+  }
+  return value;
+}
+
+export function parseMachineIdArgument(value: unknown): string {
+  if (!isMachineId(value)) throw new InvalidRequestError('machineId is not a machine id');
+  return value;
+}
+
+/**
+ * Project names for the alias fields: every name the pages show (all machines), plus
+ * the folder names stored for this machine before any split or alias.
+ */
+export function getKnownProjects(db: UsageDatabase): string[] {
+  const names = db.raw
+    .prepare(
+      `SELECT project FROM hourly UNION SELECT project FROM messages
+       ORDER BY 1 COLLATE NOCASE LIMIT ${MAX_KNOWN_PROJECTS}`,
+    )
+    .pluck()
+    .all() as string[];
+  return names;
 }
 
 export function parseCsvKind(value: unknown): CsvKind {

@@ -1,9 +1,20 @@
-import { FolderPlus, Info, RefreshCw, X } from 'lucide-react';
+import { ArrowRight, ChevronDown, FolderPlus, Info, RefreshCw, X } from 'lucide-react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import type { CsvKind, Pricing, SettingsData } from '../../shared/types';
+import { aliasProblem } from '../../shared/projects';
+import { staleDays } from '../../shared/sync';
+import type {
+  CsvKind,
+  Pricing,
+  ProjectAlias,
+  SettingsData,
+  SyncMachine,
+  SyncStatus,
+} from '../../shared/types';
+import { MachineIcon } from '../components/MachineIcon';
 import { Page } from '../components/Page';
 import { PricingEditor } from '../components/PricingEditor';
 import { Switch } from '../components/Switch';
+import { useNow } from '../hooks/useNow';
 import { useRangeFilters } from '../hooks/useRangeFilters';
 import { useUsageQuery } from '../hooks/useUsageQuery';
 import { en } from '../i18n/en';
@@ -14,7 +25,6 @@ import {
   formatPercent,
   formatTimeAgo,
 } from '../lib/format';
-import { useAppData } from '../state/appData';
 
 const t = en.settings;
 const NO_VALUE = '—';
@@ -24,7 +34,7 @@ const STATUS_MS = 8_000;
 
 export function Settings() {
   const fetchSettings = useCallback(() => window.api.getSettings(), []);
-  const { data } = useUsageQuery(fetchSettings);
+  const { data } = useUsageQuery(fetchSettings, { syncStatus: true });
   const disabled = !data?.available;
 
   return (
@@ -32,9 +42,10 @@ export function Settings() {
       {data && !data.available && <p className="settings-notice">{t.unavailable}</p>}
       <div className="settings-columns">
         <SourcesCard data={data} disabled={disabled} />
+        <SyncCard data={data} disabled={disabled} />
         <AppCard data={data} disabled={disabled} />
         <ContainersCard data={data} disabled={disabled} />
-        <SyncCard />
+        <AliasesCard data={data} disabled={disabled} />
       </div>
       <PricingCard data={data} disabled={disabled} />
     </Page>
@@ -107,16 +118,6 @@ function Status({ message }: { message: string | null }) {
   );
 }
 
-/** Re-renders every half minute, for "4 min ago". */
-function useNow(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, []);
-  return now;
-}
-
 // ── Data sources ──────────────────────────────────────────────────────────────
 
 function SourcesCard({ data, disabled }: { data: SettingsData | null; disabled: boolean }) {
@@ -147,19 +148,19 @@ function SourcesCard({ data, disabled }: { data: SettingsData | null; disabled: 
       return null;
     });
 
-  const keepLonger = () =>
+  const keepLonger = (days: number) =>
     run('retention', async () => {
-      const result = await window.api.keepHistoryLonger();
+      const result = await window.api.keepHistoryLonger(days);
       if (result.status === 'done') return s.keepLongerDone;
       return result.status === 'failed' ? t.app.actionFailed : null;
     });
 
-  const days = retention ? (retention.cleanupPeriodDays ?? retention.defaultDays) : null;
-  const canRaise =
-    retention !== undefined &&
-    retention.readable &&
-    days !== null &&
-    days < retention.suggestedDays;
+  // The choice made in the menu, as long as it is still offered.
+  const [picked, setPicked] = useState<number | null>(null);
+  const choices = retention?.choices ?? [];
+  const chosen =
+    picked !== null && choices.includes(picked) ? picked : (retention?.defaultChoice ?? null);
+  const canRaise = retention !== undefined && retention.readable && chosen !== null;
 
   return (
     <SettingsCard title={s.title}>
@@ -272,11 +273,26 @@ function SourcesCard({ data, disabled }: { data: SettingsData | null; disabled: 
           <p className="settings-hint">{s.retentionHint(retention.settingsFile)}</p>
           {canRaise && (
             <div className="settings-actions">
+              <label className="select-field">
+                <span className="select-field-label">{s.keepLongerFor}</span>
+                <select
+                  value={chosen}
+                  disabled={disabled || busy !== null}
+                  onChange={(event) => setPicked(Number(event.target.value))}
+                >
+                  {choices.map((days) => (
+                    <option key={days} value={days}>
+                      {s.retentionDays(days)}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+              </label>
               <button
                 type="button"
                 className="button"
                 disabled={disabled || busy !== null}
-                onClick={() => void keepLonger()}
+                onClick={() => void keepLonger(chosen)}
               >
                 {s.keepLonger}
               </button>
@@ -354,24 +370,381 @@ function ContainersCard({ data, disabled }: { data: SettingsData | null; disable
   );
 }
 
-// ── Sync (step 10) ────────────────────────────────────────────────────────────
+// ── Sync ──────────────────────────────────────────────────────────────────────
 
-function SyncCard() {
+function syncStatusText(status: SyncStatus, now: number): string {
   const s = t.sync;
-  const { machines } = useAppData();
-  const local = machines.find((machine) => machine.isLocal);
+  if (!status.enabled) return s.statusOff;
+  if (status.state === 'needsFolder') return s.statusNeedsFolder;
+  if (status.state === 'pending') return s.statusPending;
+  return status.lastSync ? s.statusSynced(formatTimeAgo(status.lastSync, now)) : s.statusNotYet;
+}
+
+function machineDetail(machine: SyncMachine, now: number): string {
+  const s = t.sync;
+  const parts: string[] = [en.platforms[machine.platform]];
+  const stale = machine.isLocal ? null : staleDays(machine.lastSync, now);
+  if (stale !== null) parts.push(s.stale(stale));
+  else
+    parts.push(
+      machine.lastSync ? s.syncedAgo(formatTimeAgo(machine.lastSync, now)) : s.neverSynced,
+    );
+  if (machine.problem) parts.push(s.problems[machine.problem]);
+  if (machine.conflictCopies > 0) parts.push(s.conflicts(machine.conflictCopies));
+  return parts.join(' · ');
+}
+
+function SyncCard({ data, disabled }: { data: SettingsData | null; disabled: boolean }) {
+  const s = t.sync;
+  const now = useNow();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useStatus();
+  // The name being typed; null while it is the saved one.
+  const [name, setName] = useState<string | null>(null);
+  const sync = data?.sync;
+  const status = sync?.status;
+  const enabled = status?.enabled ?? false;
+  const candidates = sync?.candidates ?? [];
+
+  const run = async (key: string, task: () => Promise<string | null>) => {
+    setBusy(key);
+    try {
+      setMessage(await task());
+    } catch (error) {
+      console.error('Sync action failed', error);
+      setMessage(t.app.actionFailed);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const toggle = (on: boolean) =>
+    run('toggle', async () => {
+      await window.api.setSettings({ syncEnabled: on });
+      return null;
+    });
+  const choose = () =>
+    run('choose', async () => {
+      await window.api.chooseSyncFolder();
+      return null;
+    });
+  const use = (folder: string) =>
+    run('use', async () => {
+      await window.api.useSyncFolder(folder);
+      return null;
+    });
+  const syncNow = () =>
+    run('sync', async () => {
+      await window.api.syncNow();
+      return s.synced;
+    });
+  const saveName = (value: string) =>
+    run('name', async () => {
+      await window.api.setSettings({ machineName: value });
+      setName(null);
+      return s.saved;
+    });
+  const remove = (machineId: string) =>
+    run('remove', async () => {
+      const result = await window.api.removeMachine(machineId);
+      return result.status === 'failed' ? t.app.actionFailed : null;
+    });
+  const restore = (machineId: string) =>
+    run('restore', async () => {
+      await window.api.restoreMachine(machineId);
+      return null;
+    });
+
+  const typed = name?.trim() ?? '';
+  const nameChanged = name !== null && typed !== '' && typed !== sync?.machineName;
+  const machines = sync?.machines ?? [];
+  const currentRoot = status?.folder ?? null;
+
   return (
-    <SettingsCard title={s.title}>
+    <SettingsCard
+      title={s.title}
+      aside={
+        <Switch
+          label={s.toggle}
+          checked={enabled}
+          disabled={disabled || !sync || busy !== null}
+          onChange={(on) => void toggle(on)}
+        />
+      }
+    >
+      <p className="settings-hint">{s.explain}</p>
+      <div className="sync-what">
+        <span className="settings-label">{s.whatTitle}</span>
+        <p className="settings-hint">{s.what}</p>
+        <p className="settings-hint sync-never">{s.never}</p>
+      </div>
+
       <div className="settings-rows">
-        <Row label={s.status}>{s.off}</Row>
-        <Row label={s.thisMachine}>
-          <span className="num">{local?.name ?? NO_VALUE}</span>
+        <Row label={s.status} hint={status?.state === 'pending' ? s.statusPendingHint : undefined}>
+          <span className={`sync-state sync-state--${status?.state ?? 'off'}`}>
+            {status ? syncStatusText(status, now) : NO_VALUE}
+          </span>
         </Row>
-        <Row label={s.knownMachines}>
-          <span className="num">{machines.length > 0 ? formatInt(machines.length) : NO_VALUE}</span>
+        {enabled && (
+          <Row label={s.folder} hint={sync?.folderPicked ? s.folderPicked : undefined}>
+            <span className="settings-inline sync-folder">
+              {currentRoot && (
+                <span className="num settings-path" title={currentRoot}>
+                  {currentRoot}
+                </span>
+              )}
+              <button
+                type="button"
+                className="button button--small"
+                disabled={disabled || busy !== null}
+                onClick={() => void choose()}
+              >
+                {currentRoot ? s.change : s.chooseFolder}
+              </button>
+            </span>
+          </Row>
+        )}
+      </div>
+
+      {enabled && candidates.length > 1 && (
+        <div className="settings-block">
+          <p className="settings-hint">
+            {status?.state === 'needsFolder' ? s.severalFound : s.accountsFound}
+          </p>
+          <ul className="folder-list">
+            {candidates.map((candidate) => {
+              const current = currentRoot?.startsWith(candidate.display) ?? false;
+              return (
+                <li key={candidate.path}>
+                  <button
+                    type="button"
+                    className={`folder-item sync-candidate${current ? ' is-current' : ''}`}
+                    aria-pressed={current}
+                    aria-label={s.useCandidate(candidate.display)}
+                    disabled={disabled || busy !== null}
+                    onClick={() => void use(candidate.path)}
+                  >
+                    <span className="folder-path num">{candidate.display}</span>
+                    {candidate.account && <span className="folder-meta">{candidate.account}</span>}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+      {enabled && status?.state === 'needsFolder' && candidates.length === 0 && (
+        <p className="settings-hint">{s.noneFound}</p>
+      )}
+
+      <div className="settings-rows">
+        <Row label={s.machineName} hint={s.machineNameHint}>
+          <form
+            className="settings-inline"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (nameChanged) void saveName(typed);
+            }}
+          >
+            <input
+              className="text-field"
+              value={name ?? sync?.machineName ?? ''}
+              maxLength={60}
+              aria-label={s.machineName}
+              disabled={disabled || !sync}
+              onChange={(event) => setName(event.target.value)}
+            />
+            {nameChanged && (
+              <button type="submit" className="button button--small" disabled={busy !== null}>
+                {s.save}
+              </button>
+            )}
+          </form>
         </Row>
       </div>
-      <p className="settings-hint">{s.hint}</p>
+
+      <div className="settings-block">
+        <span className="settings-label">{s.knownMachines}</span>
+        <ul className="container-list">
+          {machines.map((machine) => (
+            <li
+              key={machine.id}
+              className={`container-item sync-machine${machine.hidden ? ' is-hidden' : ''}`}
+            >
+              <span className="sync-machine-icon">
+                <MachineIcon platform={machine.platform} />
+              </span>
+              <div className="container-text">
+                <span className="container-name">
+                  {machine.name}
+                  {machine.isLocal && <span className="settings-hint"> · {s.thisMachine}</span>}
+                  {machine.hidden && <span className="kind-badge">{s.hidden}</span>}
+                </span>
+                <span
+                  className={`settings-hint${machine.problem || staleDays(machine.lastSync, now) !== null ? ' sync-warning' : ''}`}
+                >
+                  {machineDetail(machine, now)}
+                </span>
+              </div>
+              {!machine.isLocal &&
+                (machine.hidden ? (
+                  <button
+                    type="button"
+                    className="button button--small"
+                    disabled={disabled || busy !== null}
+                    onClick={() => void restore(machine.id)}
+                  >
+                    {s.restore}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={s.remove(machine.name)}
+                    title={s.remove(machine.name)}
+                    disabled={disabled || busy !== null}
+                    onClick={() => void remove(machine.id)}
+                  >
+                    <X size={14} strokeWidth={2} aria-hidden="true" />
+                  </button>
+                ))}
+            </li>
+          ))}
+        </ul>
+        {enabled && machines.length <= 1 && <p className="settings-hint">{s.noMachinesYet}</p>}
+      </div>
+
+      {enabled && (
+        <div className="settings-actions">
+          <button
+            type="button"
+            className="button"
+            disabled={disabled || busy !== null || status?.state === 'needsFolder'}
+            onClick={() => void syncNow()}
+          >
+            <RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+            {busy === 'sync' ? s.syncing : s.syncNow}
+          </button>
+        </div>
+      )}
+      <Status message={message} />
+    </SettingsCard>
+  );
+}
+
+// ── Project aliases ───────────────────────────────────────────────────────────
+
+function AliasesCard({ data, disabled }: { data: SettingsData | null; disabled: boolean }) {
+  const a = t.aliases;
+  // The list as last asked for, shown while the tables are being rebuilt.
+  const [pending, setPending] = useState<ProjectAlias[] | null>(null);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const list = pending ?? data?.aliases.list ?? [];
+  const known = data?.aliases.knownProjects ?? [];
+
+  const save = async (next: ProjectAlias[]) => {
+    setPending(next);
+    try {
+      await window.api.setSettings({ projectAliases: next });
+    } catch (failure) {
+      console.error('Could not change the aliases', failure);
+      setError(t.app.actionFailed);
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const add = () => {
+    const old = from.trim();
+    const renamed = to.trim();
+    const problem = aliasProblem(list, old, renamed);
+    if (problem) {
+      setError(a.problems[problem]);
+      return;
+    }
+    setError(null);
+    setFrom('');
+    setTo('');
+    void save([...list, { from: old, to: renamed }]);
+  };
+
+  const busy = disabled || pending !== null;
+  return (
+    <SettingsCard
+      title={a.title}
+      aside={pending ? <span className="settings-hint">{a.applying}</span> : undefined}
+    >
+      <p className="settings-hint">{a.hint}</p>
+      <p className="settings-hint alias-example num">{a.example}</p>
+      {list.length === 0 ? (
+        <p className="settings-empty">{a.empty}</p>
+      ) : (
+        <ul className="alias-list">
+          {list.map((alias) => (
+            <li key={alias.from} className="alias-item">
+              <span className="alias-name" title={alias.from}>
+                {alias.from}
+              </span>
+              <ArrowRight size={14} strokeWidth={2} aria-hidden="true" className="alias-arrow" />
+              <span className="alias-name" title={alias.to}>
+                {alias.to}
+              </span>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={a.remove(alias.from, alias.to)}
+                title={a.remove(alias.from, alias.to)}
+                disabled={busy}
+                onClick={() => void save(list.filter((item) => item.from !== alias.from))}
+              >
+                <X size={14} strokeWidth={2} aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form
+        className="alias-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          add();
+        }}
+      >
+        <input
+          className="text-field"
+          list="alias-projects"
+          placeholder={a.from}
+          aria-label={a.from}
+          value={from}
+          disabled={busy}
+          onChange={(event) => setFrom(event.target.value)}
+        />
+        <ArrowRight size={14} strokeWidth={2} aria-hidden="true" className="alias-arrow" />
+        <input
+          className="text-field"
+          list="alias-projects"
+          placeholder={a.to}
+          aria-label={a.to}
+          value={to}
+          disabled={busy}
+          onChange={(event) => setTo(event.target.value)}
+        />
+        <button type="submit" className="button button--small" disabled={busy}>
+          {a.add}
+        </button>
+        <datalist id="alias-projects">
+          {known.map((project) => (
+            <option key={project} value={project} />
+          ))}
+        </datalist>
+      </form>
+      {error && (
+        <p className="settings-error" role="alert">
+          {error}
+        </p>
+      )}
     </SettingsCard>
   );
 }

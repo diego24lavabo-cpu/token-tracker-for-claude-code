@@ -9,7 +9,12 @@ import {
   getProjects,
   InvalidRequestError,
 } from '../electron/aggregate';
-import { DEFAULT_CLEANUP_DAYS, readRetention, writeCleanupDays } from '../electron/claudeSettings';
+import {
+  cleanupChoices,
+  DEFAULT_CLEANUP_DAYS,
+  readRetention,
+  writeCleanupDays,
+} from '../electron/claudeSettings';
 import { buildCsvTable, csvFileName, toCsv } from '../electron/csv';
 import type { UsageDatabase } from '../electron/db';
 import { claudeSettingsFile, logFolderFromPick, samePath } from '../electron/paths';
@@ -20,6 +25,7 @@ import {
   getExtraLogRoots,
   getFileWatching,
   getUsedModels,
+  parseCleanupDays,
   parseCsvKind,
   parseSettingsPatch,
   setExtraLogRoots,
@@ -320,6 +326,34 @@ describe('settings', () => {
 });
 
 describe("Claude Code's cleanupPeriodDays", () => {
+  it('offers 90, 180 or 365 days, longer than the current value, 90 first', () => {
+    expect(cleanupChoices(DEFAULT_CLEANUP_DAYS)).toEqual({
+      choices: [90, 180, 365],
+      defaultChoice: 90,
+    });
+    expect(cleanupChoices(90)).toEqual({ choices: [180, 365], defaultChoice: 180 });
+    expect(cleanupChoices(200)).toEqual({ choices: [365], defaultChoice: 365 });
+    expect(cleanupChoices(365)).toEqual({ choices: [], defaultChoice: null });
+    expect(parseCleanupDays(180)).toBe(180);
+    for (const bad of [30, 120, '90', null, 1000]) {
+      expect(() => parseCleanupDays(bad)).toThrow(InvalidRequestError);
+    }
+  });
+
+  it('checks the sync settings and the machine name', () => {
+    expect(parseSettingsPatch({ syncEnabled: true, machineName: '  MacBook ' })).toEqual({
+      syncEnabled: true,
+      machineName: 'MacBook',
+    });
+    for (const bad of [
+      { syncEnabled: 'yes' },
+      { machineName: '   ' },
+      { machineName: 'x'.repeat(61) },
+    ]) {
+      expect(() => parseSettingsPatch(bad)).toThrow(InvalidRequestError);
+    }
+  });
+
   it('reads the value, the default and an unreadable file', () => {
     const dir = tempDir();
     const file = path.join(dir, 'settings.json');

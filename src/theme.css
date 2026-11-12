@@ -2544,6 +2544,381 @@ button {
   font-size: 13px;
 }
 
+/* ── Sync and aliases (Settings) ───────────────────────────── */
+
+.text-field {
+  min-width: 0;
+  height: 30px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-button);
+  background: var(--bg-surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.text-field:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.text-field:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.text-field:disabled {
+  opacity: 0.5;
+}
+
+.text-field::placeholder {
+  color: var(--text-muted);
+}
+
+.settings-value .text-field {
+  width: 180px;
+}
+
+.sync-what {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-surface);
+}
+
+.sync-what .settings-label {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.sync-never {
+  color: var(--accent-light);
+}
+
+.sync-state--synced {
+  color: var(--text);
+}
+
+.sync-state--pending,
+.sync-state--needsFolder {
+  color: var(--accent-light);
+}
+
+.sync-state--off {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.sync-folder {
+  min-width: 0;
+}
+
+.sync-candidate {
+  width: 100%;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sync-candidate:hover:not(:disabled) {
+  border-color: var(--accent-dark);
+}
+
+.sync-candidate.is-current {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.sync-candidate:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.sync-machine {
+  justify-content: flex-start;
+}
+
+.sync-machine .container-text {
+  flex: 1;
+}
+
+/* Warnings must be read in full. */
+.sync-machine .container-text .settings-hint {
+  white-space: normal;
+}
+
+.sync-machine .container-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sync-machine-icon {
+  display: grid;
+  flex: none;
+  color: var(--accent);
+  place-items: center;
+}
+
+.sync-machine.is-hidden .sync-machine-icon,
+.sync-machine.is-hidden .container-name {
+  color: var(--text-muted);
+}
+
+.sync-warning {
+  color: var(--accent-light);
+}
+
+.alias-example {
+  font-size: 11.5px;
+}
+
+.alias-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.alias-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-surface);
+  font-size: 13px;
+}
+
+.alias-name {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alias-arrow {
+  flex: none;
+  color: var(--accent);
+}
+
+.alias-form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.alias-form .text-field {
+  flex: 1 1 0;
+}
+
+/* ── Title bar sync status ─────────────────────────────────── */
+
+.titlebar-status--off .status-dot {
+  background: var(--text-muted);
+}
+
+.titlebar-status--warning .status-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--accent-light);
+}
+
+/* ── Machines page ─────────────────────────────────────────── */
+
+.machine-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--space-4);
+}
+
+.machine-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 18px 20px;
+}
+
+.machine-card--hint {
+  justify-content: center;
+  border-style: dashed;
+  background: transparent;
+}
+
+.machine-card--hint .button {
+  align-self: flex-start;
+}
+
+.machine-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.machine-card-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.machine-card-name .card-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.machine-card-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+}
+
+.machine-card-total {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.machine-card-tokens {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.machine-card-share {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.machine-card-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px var(--space-6);
+  max-width: 520px;
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.machine-card-stats > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.machine-card-stats dt {
+  color: var(--text-muted);
+}
+
+.machine-card-stats dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.machine-card-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.machine-card-sync.is-stale {
+  color: var(--accent-light);
+  cursor: help;
+}
+
+.machine-card-sync.is-stale .status-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--accent-light);
+}
+
+.machines-charts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: var(--space-4);
+}
+
+@media (min-width: 1280px) {
+  .machines-charts {
+    grid-template-columns: minmax(0, 3fr) minmax(340px, 2fr);
+  }
+}
+
+/* At least 300 px, and as tall as the projects card next to it. */
+.machines-weekly .chart-card-body {
+  flex: 1 1 300px;
+  min-height: 300px;
+}
+
+.project-machines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-machine {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.project-machine-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: 12.5px;
+}
+
+.project-machine-name {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-machine-shares {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.project-machine-bar {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--border);
+}
+
+.project-machine-part {
+  min-width: 3px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;

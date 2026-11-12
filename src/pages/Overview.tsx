@@ -7,11 +7,12 @@ import { KpiCard } from '../components/KpiCard';
 import { Page } from '../components/Page';
 import { ShortcutCard } from '../components/ShortcutCard';
 import { StackedDailyBars } from '../components/StackedDailyBars';
+import { useNow } from '../hooks/useNow';
 import { useRangeFilters } from '../hooks/useRangeFilters';
 import { useToday } from '../hooks/useToday';
 import { useUsageQuery } from '../hooks/useUsageQuery';
 import { en } from '../i18n/en';
-import { formatCost, formatInt, formatPercent, formatTokens } from '../lib/format';
+import { formatCost, formatInt, formatPercent, formatTimeAgo, formatTokens } from '../lib/format';
 import { useAppData } from '../state/appData';
 
 const NO_VALUE = '—';
@@ -137,6 +138,13 @@ function DailyCard({ data, today }: { data: OverviewData | null; today: string }
 function Shortcuts({ data }: { data: OverviewData | null }) {
   const shortcuts = data?.shortcuts;
   const s = t.shortcuts;
+  const { sync } = useAppData();
+  const now = useNow();
+  const syncDetail = !sync?.enabled
+    ? s.localOnly
+    : sync.state === 'synced' && sync.lastSync
+      ? s.syncedAgo(formatTimeAgo(sync.lastSync, now))
+      : s.syncPending;
 
   const project = shortcuts?.project;
   const model = shortcuts?.model;
@@ -209,7 +217,7 @@ function Shortcuts({ data }: { data: OverviewData | null }) {
               ? s.none
               : NO_VALUE
         }
-        detail={shortcuts ? s.localOnly : NO_VALUE}
+        detail={shortcuts ? syncDetail : NO_VALUE}
       />
     </div>
   );

@@ -96,9 +96,13 @@ describe('schema', () => {
       'hourly',
       'machines',
       'messages',
+      'remote_files',
+      'session_days',
+      'session_models',
       'session_projects',
       'sessions',
       'settings',
+      'subagent_models',
       'subagents',
     ]);
   });

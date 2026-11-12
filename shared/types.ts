@@ -2,6 +2,9 @@
  * Types shared by the Electron main process and the React renderer.
  * Every number the UI shows comes from the main process through the `Api` below.
  */
+import type { ProjectAlias } from './projects';
+
+export type { ProjectAlias } from './projects';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
 
@@ -633,6 +636,103 @@ export interface Agents {
   modelsMainVsSub: AgentModels;
 }
 
+// ── Machines ──────────────────────────────────────────────────────────────────
+
+/** One machine over the period, as a card of the Machines page. */
+export interface MachineCard {
+  id: string;
+  name: string;
+  platform: Platform;
+  isLocal: boolean;
+  /** When the machine last wrote its sync files, UTC ISO. Null when it never did. */
+  lastSync: string | null;
+  /** All token types. */
+  tokens: number;
+  /** Part of all machines' tokens. */
+  share: number;
+  activeDays: number;
+  /** Sessions that started in the period. */
+  sessions: number;
+  /** Projects with usage in the period. */
+  projects: number;
+  cost: number | null;
+  costIsPartial: boolean;
+}
+
+/** One project, split by machine. */
+export interface MachineProject {
+  name: string;
+  tokens: number;
+  /** Tokens on each machine, in the order of `MachinesDetail.cards`. */
+  machines: number[];
+}
+
+export interface MachinesDetail {
+  /** False when the database holds no usage at all. */
+  hasData: boolean;
+  /** Every machine of the machine selector: this one first, then by tokens. */
+  cards: MachineCard[];
+  /**
+   * The 12 weeks that end with the week of the period's last day, oldest first.
+   * `tokens` has one value per card, in the same order.
+   */
+  weekly: WeeklyShare[];
+  /** The projects with the most tokens in the period, largest first. */
+  projects: MachineProject[];
+  /** Projects of the period left out of `projects`. */
+  moreProjects: number;
+}
+
+// ── Sync ──────────────────────────────────────────────────────────────────────
+
+/**
+ * - `off`: sync is turned off.
+ * - `needsFolder`: sync is on, but no Google Drive folder is chosen (none found, or several).
+ * - `pending`: the folder cannot be reached right now (Google Drive not running, offline).
+ * - `synced`: the last read and write worked.
+ */
+export type SyncState = 'off' | 'needsFolder' | 'pending' | 'synced';
+
+export interface SyncStatus {
+  enabled: boolean;
+  state: SyncState;
+  /** Machines of the machine selector, this one included. */
+  machines: number;
+  /** When this machine last wrote its sync files, UTC ISO. Null when it never did. */
+  lastSync: string | null;
+  /** The sync folder (`…/ClaudeTokenTracker`) shortened with `~`, or null without one. */
+  folder: string | null;
+}
+
+/** A Google Drive folder found on this machine. */
+export interface DriveCandidate {
+  /** The "My Drive" folder, absolute: its identity for `useSyncFolder`. */
+  path: string;
+  /** The same path shortened with `~`. */
+  display: string;
+  /** The account it belongs to, when the system says so. */
+  account: string | null;
+}
+
+/** A machine as Settings lists it, hidden ones included. */
+export interface SyncMachine {
+  id: string;
+  name: string;
+  platform: Platform;
+  isLocal: boolean;
+  lastSync: string | null;
+  appVersion: string | null;
+  /** Removed in Settings: its usage is left out everywhere. */
+  hidden: boolean;
+  /**
+   * Why its numbers may not be current: its files need a newer version of the app, the
+   * last copy read was broken, or its folder is no longer in the sync folder.
+   */
+  problem: 'newerVersion' | 'unreadable' | 'missing' | null;
+  /** Drive conflict copies (`2026 (1).json`) found in its folder and ignored. */
+  conflictCopies: number;
+}
+
 /** The API exposed to the renderer as `window.api` by the preload script. */
 // ── Settings ──────────────────────────────────────────────────────────────────
 
@@ -684,12 +784,30 @@ export interface SettingsData {
     cleanupPeriodDays: number | null;
     /** What Claude Code uses when the value is not set. */
     defaultDays: number;
-    /** The value offered by "Keep Claude Code history longer". */
-    suggestedDays: number;
+    /** The values "Keep Claude Code history longer" offers: those above the current one. */
+    choices: number[];
+    /** The choice selected at first, or null when there is none. */
+    defaultChoice: number | null;
     /** False when the file exists but is not valid JSON: the app then never writes it. */
     readable: boolean;
   };
   containers: ContainerCandidate[];
+  aliases: {
+    list: ProjectAlias[];
+    /** Project names seen so far, as reported and as stored, for the name fields. */
+    knownProjects: string[];
+  };
+  sync: {
+    status: SyncStatus;
+    /** The Google Drive folders found on this machine. */
+    candidates: DriveCandidate[];
+    /** True when the folder was picked by hand rather than found. */
+    folderPicked: boolean;
+    /** This machine's name, as the other machines show it. */
+    machineName: string;
+    /** This machine first, then the others; hidden ones included. */
+    machines: SyncMachine[];
+  };
   pricing: {
     current: Pricing;
     defaults: Pricing;
@@ -712,7 +830,12 @@ export interface SettingsPatch {
   fileWatching?: boolean;
   /** Replaces the list of folder projects split by subfolder. */
   containerProjects?: string[];
+  /** Replaces the list of project aliases. */
+  projectAliases?: ProjectAlias[];
   pricing?: Pricing;
+  /** Turns sync on or off. Turning it on looks for the Google Drive folder if none is set. */
+  syncEnabled?: boolean;
+  machineName?: string;
 }
 
 export type CsvKind = 'daily' | 'projects' | 'models' | 'agentTypes';
@@ -726,6 +849,8 @@ export type AddFolderResult =
   | { status: 'cancelled' };
 
 export type ActionResult = { status: 'done' } | { status: 'cancelled' } | { status: 'failed' };
+
+export type ChooseFolderResult = { status: 'chosen'; folder: string } | { status: 'cancelled' };
 
 export interface Api {
   /** Available synchronously so the title bar can lay out on first paint. */
@@ -744,6 +869,9 @@ export interface Api {
   /** Null when the session is not in the database. */
   getSessionDetail(machineId: string, sessionId: string): Promise<SessionDetail | null>;
   getAgents(filters: Filters): Promise<Agents>;
+  /** The machine filter does not apply: the page compares every machine. */
+  getMachinesDetail(filters: Filters): Promise<MachinesDetail>;
+  getSyncStatus(): Promise<SyncStatus>;
   getSettings(): Promise<SettingsData>;
   /** Applies the given changes, then sends `usageUpdated`. */
   setSettings(patch: SettingsPatch): Promise<SettingsData>;
@@ -757,8 +885,23 @@ export interface Api {
   exportCsv(kind: CsvKind, filters: Filters): Promise<ExportResult>;
   /** After a confirmation, reads every transcript still on disk again. History is kept. */
   rebuildDatabase(): Promise<ActionResult>;
-  /** After a confirmation, raises `cleanupPeriodDays` in Claude Code's settings file. */
-  keepHistoryLonger(): Promise<ActionResult>;
+  /**
+   * After a confirmation, raises `cleanupPeriodDays` in Claude Code's settings file to
+   * `days`, one of `SettingsData.retention.choices`.
+   */
+  keepHistoryLonger(days: number): Promise<ActionResult>;
+  /** Asks for the sync folder with a folder picker, then syncs through it. */
+  chooseSyncFolder(): Promise<ChooseFolderResult>;
+  /** Syncs through one of `SettingsData.sync.candidates`. */
+  useSyncFolder(path: string): Promise<SettingsData>;
+  /** Writes this machine's files and reads the others' now. Resolves when done. */
+  syncNow(): Promise<void>;
+  /** After a confirmation, hides another machine (and can delete its sync files). */
+  removeMachine(machineId: string): Promise<ActionResult>;
+  /** Shows a hidden machine again. */
+  restoreMachine(machineId: string): Promise<void>;
   /** Subscribes to "usage data changed" events. Returns an unsubscribe function. */
   onUsageUpdated(callback: () => void): () => void;
+  /** Subscribes to "sync status changed" events (no usage change). */
+  onSyncUpdated(callback: () => void): () => void;
 }

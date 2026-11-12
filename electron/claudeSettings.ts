@@ -9,8 +9,27 @@ import path from 'node:path';
 
 /** What Claude Code uses when `cleanupPeriodDays` is not set. */
 export const DEFAULT_CLEANUP_DAYS = 30;
-/** The value offered by "Keep Claude Code history longer". */
-export const SUGGESTED_CLEANUP_DAYS = 365;
+/** The values "Keep Claude Code history longer" offers. */
+export const CLEANUP_CHOICES: readonly number[] = [90, 180, 365];
+/** The choice selected at first. */
+export const DEFAULT_CLEANUP_CHOICE = 90;
+
+/**
+ * The choices longer than the current value, and the one to select first: the default
+ * when it is offered, else the shortest one offered. Null when none is longer.
+ */
+export function cleanupChoices(current: number): {
+  choices: number[];
+  defaultChoice: number | null;
+} {
+  const choices = CLEANUP_CHOICES.filter((days) => days > current);
+  return {
+    choices,
+    defaultChoice: choices.includes(DEFAULT_CLEANUP_CHOICE)
+      ? DEFAULT_CLEANUP_CHOICE
+      : (choices[0] ?? null),
+  };
+}
 
 const BYTE_ORDER_MARK = String.fromCharCode(0xfeff);
 

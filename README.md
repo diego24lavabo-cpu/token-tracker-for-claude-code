@@ -57,15 +57,17 @@ Only the usage numbers of each response are read (token counts, model, timestamp
 
 ## How sync works
 
-Sync is **off by default**. When you turn it on in Settings, the app writes small JSON files into a `ClaudeTokenTracker` folder inside your local **Google Drive for desktop** folder, and reads the files written by your other machines. There is no Google API, no OAuth and no server: the Drive client on your computer does the transfer.
+Sync is **off by default**. When you turn it on in Settings, the app writes small JSON files into a `ClaudeTokenTracker` folder inside your local **Google Drive for desktop** folder ("My Drive", in any language), and reads the files written by your other machines. There is no Google API, no OAuth and no server: the Drive client on your computer does the transfer. With several Google accounts, or none found, you choose the folder.
 
-What is written to Drive:
+Each machine writes only its own folder, `ClaudeTokenTracker/machines/<random id>/`: `machine.json` (name, platform, last sync) and one file per year (`2026.json`, a few MB at most). What is written:
 
-- aggregated token counts per day and hour, project name (folder name only), model, agent type
-- one summary line per session and per subagent run (ids, timestamps, token counts)
+- aggregated token counts per day and hour, project name (folder name only), model, agent type and kind
+- one summary per session and per subagent run: random ids, start and end times, active time, token counts per model, the projects it worked in and the days it was active
 - your machine's name and platform
 
 What is **never** written: prompts, responses, code, file paths, subagent task descriptions.
+
+Projects with the same name on several machines are merged, with a split per machine. After renaming a project folder, map the old name to the new one in Settings → Project aliases.
 
 ## Privacy
 

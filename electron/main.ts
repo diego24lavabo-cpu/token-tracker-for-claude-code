@@ -20,9 +20,11 @@ import type {
   Agents,
   AppInfo,
   Calendar,
+  ChooseFolderResult,
   ExportResult,
   LogFolder,
   Machine,
+  MachinesDetail,
   Models,
   Overview,
   Platform,
@@ -32,10 +34,12 @@ import type {
   SessionDetail,
   Sessions,
   SettingsData,
+  SyncStatus,
 } from '../shared/types';
 import {
   emptyAgents,
   emptyCalendar,
+  emptyMachinesDetail,
   emptyModels,
   emptyOverview,
   emptyProjectDetail,
@@ -43,6 +47,7 @@ import {
   emptySessions,
   getAgents,
   getCalendar,
+  getMachinesDetail,
   getModels,
   getOverview,
   getProjectDetail,
@@ -58,13 +63,14 @@ import {
   parseSessionSort,
 } from './aggregate';
 import {
+  cleanupChoices,
   DEFAULT_CLEANUP_DAYS,
   readRetention,
-  SUGGESTED_CLEANUP_DAYS,
   writeCleanupDays,
 } from './claudeSettings';
 import { buildCsvTable, csvFileName, toCsv } from './csv';
 import { UsageDatabase } from './db';
+import { syncFolderFromPick } from './drive';
 import { installAppMenu } from './menu';
 import {
   claudeSettingsFile,
@@ -81,13 +87,18 @@ import {
   getContainerCandidates,
   getExtraLogRoots,
   getFileWatching,
+  getKnownProjects,
   getUsedModels,
+  parseCleanupDays,
   parseCsvKind,
   parseFolderPath,
+  parseMachineIdArgument,
   parseSettingsPatch,
   setExtraLogRoots,
   setFileWatching,
 } from './settings';
+import { SyncService } from './sync';
+import { SYNC_FOLDER_NAME } from './syncFormat';
 import { LogWatcher, sameFolders } from './watcher';
 
 const APP_ID = 'io.github.diego24lavabo-cpu.tokentracker';
@@ -164,12 +175,25 @@ function notifyUsageUpdated(): void {
   mainWindow?.webContents.send(IPC.usageUpdated);
 }
 
+function notifySyncUpdated(): void {
+  mainWindow?.webContents.send(IPC.syncUpdated);
+}
+
 /** Runs a task after every task queued before it. */
 function serial<T>(task: () => T | Promise<T>): Promise<T> {
   const run = taskChain.then(task);
   taskChain = run.catch(() => undefined);
   return run;
 }
+
+const sync = new SyncService({
+  database: () => database,
+  appVersion: app.getVersion(),
+  platform: currentPlatform(),
+  serial,
+  onDataChanged: notifyUsageUpdated,
+  onStatusChanged: notifySyncUpdated,
+});
 
 /** The folders found by the app plus those added in Settings, that exist. */
 function currentLogRoots(): string[] {
@@ -210,11 +234,19 @@ function scanUsage(before?: (db: UsageDatabase) => void): Promise<void> {
     if (!db || quitting) return;
     before?.(db);
     const roots = currentLogRoots();
+    const first = scansDone === 0;
     try {
       const summary = await scanLogs(db, roots);
       logScan(summary);
       lastScan = { at: new Date().toISOString(), durationMs: summary.durationMs };
       notifyUsageUpdated();
+      if (first) {
+        // At startup: write what changed while the app was closed, and read the others.
+        sync.start();
+        void sync.syncNow();
+      } else if (before || summary.imported + summary.upgraded > 0) {
+        sync.localDataChanged();
+      }
     } catch (error) {
       if (!quitting) console.error('[scan] The scan failed:', error);
     }
@@ -256,8 +288,10 @@ function launchAtLoginUnavailable(): SettingsData['app']['launchAtLoginUnavailab
   return process.platform === 'darwin' || process.platform === 'win32' ? null : 'platform';
 }
 
-function buildSettings(): SettingsData {
+async function buildSettings(): Promise<SettingsData> {
   const db = database;
+  // Looking for Google Drive only matters while sync is on; turning it on looks itself.
+  const candidates = db && sync.enabled ? await sync.candidates() : [];
   const stats = db?.stats();
   const filesPerRoot = db?.filesPerRoot() ?? new Map<string, number>();
   const filesIn = (folder: string) => {
@@ -300,10 +334,21 @@ function buildSettings(): SettingsData {
       settingsFile: tildify(settingsFile),
       cleanupPeriodDays: retention.cleanupPeriodDays,
       defaultDays: DEFAULT_CLEANUP_DAYS,
-      suggestedDays: SUGGESTED_CLEANUP_DAYS,
+      ...cleanupChoices(retention.cleanupPeriodDays ?? DEFAULT_CLEANUP_DAYS),
       readable: retention.readable,
     },
     containers: db ? getContainerCandidates(db) : [],
+    aliases: {
+      list: db?.getProjectAliases() ?? [],
+      knownProjects: db ? getKnownProjects(db) : [],
+    },
+    sync: {
+      status: sync.status(),
+      candidates,
+      folderPicked: sync.folderPicked,
+      machineName: db?.machineName ?? '',
+      machines: sync.machines(),
+    },
     pricing: {
       current: pricing,
       defaults: DEFAULT_PRICING,
@@ -338,6 +383,20 @@ async function applySettings(input: unknown): Promise<SettingsData> {
   if (patch.containerProjects) {
     const projects = patch.containerProjects;
     await serial(() => db.setContainerProjects(projects));
+    sync.localDataChanged();
+  }
+  if (patch.projectAliases) {
+    const aliases = patch.projectAliases;
+    // Aliases apply to this machine's rows and to the other machines' alike.
+    await serial(() => {
+      db.setProjectAliases(aliases);
+      sync.materializeAll(db);
+    });
+    sync.localDataChanged();
+  }
+  if (patch.machineName !== undefined) {
+    db.setMachineName(patch.machineName);
+    sync.localDataChanged();
   }
   if (patch.fileWatching !== undefined) {
     setFileWatching(db, patch.fileWatching);
@@ -345,9 +404,71 @@ async function applySettings(input: unknown): Promise<SettingsData> {
     if (patch.fileWatching) await scanUsage();
     else await serial(() => updateWatcher());
   }
+  if (patch.syncEnabled !== undefined) await sync.setEnabled(patch.syncEnabled);
 
   notifyUsageUpdated();
   return buildSettings();
+}
+
+async function chooseSyncFolder(): Promise<ChooseFolderResult> {
+  requireDatabase();
+  const options: Electron.OpenDialogOptions = {
+    title: en.dialogs.pickSyncFolder.title,
+    buttonLabel: en.dialogs.pickSyncFolder.button,
+    defaultPath: os.homedir(),
+    properties: ['openDirectory', 'createDirectory'],
+  };
+  const picked = await withWindow((window) =>
+    window ? dialog.showOpenDialog(window, options) : dialog.showOpenDialog(options),
+  );
+  const choice = picked.filePaths[0];
+  if (picked.canceled || !choice) return { status: 'cancelled' };
+
+  const folder = syncFolderFromPick(choice, SYNC_FOLDER_NAME);
+  sync.setFolder(folder, true);
+  if (!sync.enabled) await sync.setEnabled(true);
+  else await sync.syncNow();
+  notifyUsageUpdated();
+  return { status: 'chosen', folder: tildify(folder) };
+}
+
+/** Syncs through a "My Drive" folder found by the app; any other path is refused. */
+async function useSyncFolder(input: unknown): Promise<SettingsData> {
+  const target = parseFolderPath(input);
+  requireDatabase();
+  const candidate = (await sync.candidates()).find((root) => samePath(root.path, target));
+  if (!candidate) throw new Error('This folder is not one of the Google Drive folders found');
+  sync.setFolder(path.join(candidate.path, SYNC_FOLDER_NAME), false);
+  if (!sync.enabled) await sync.setEnabled(true);
+  else await sync.syncNow();
+  notifyUsageUpdated();
+  return buildSettings();
+}
+
+async function removeMachine(input: unknown): Promise<ActionResult> {
+  const machineId = parseMachineIdArgument(input);
+  const db = requireDatabase();
+  const machine = db.listAllMachines().find((item) => item.id === machineId);
+  if (!machine || machine.isLocal) return { status: 'cancelled' };
+
+  const t = en.dialogs.removeMachine;
+  const answer = await showMessage({
+    type: 'question',
+    message: t.message(machine.name),
+    detail: t.detail,
+    buttons: [t.hide, t.hideAndDelete, t.cancel],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+  });
+  if (answer.response === 2) return { status: 'cancelled' };
+  try {
+    await sync.hideMachine(machineId, answer.response === 1);
+  } catch (error) {
+    console.error(`[sync] Could not remove the machine: ${errorText(error)}`);
+    return { status: 'failed' };
+  }
+  return { status: 'done' };
 }
 
 /** Shows a native dialog attached to the window when there is one. */
@@ -443,17 +564,19 @@ async function rebuildDatabase(): Promise<ActionResult> {
   return { status: 'done' };
 }
 
-async function keepHistoryLonger(): Promise<ActionResult> {
+async function keepHistoryLonger(input: unknown): Promise<ActionResult> {
+  const days = parseCleanupDays(input);
   const t = en.dialogs.keepLonger;
   const file = claudeSettingsFile();
   const state = readRetention(file);
   if (!state.readable) {
-    await showMessage({ type: 'info', message: t.unreadable(tildify(file)) });
+    await showMessage({ type: 'info', message: t.unreadable(tildify(file), days) });
     return { status: 'cancelled' };
   }
 
-  const days = SUGGESTED_CLEANUP_DAYS;
   const current = state.cleanupPeriodDays ?? DEFAULT_CLEANUP_DAYS;
+  // Never shorten what the user set.
+  if (current >= days) return { status: 'cancelled' };
   const detail = t.detail(current, days, tildify(file));
   if (!(await confirm(t.message(days), detail, t.confirm, t.cancel))) {
     return { status: 'cancelled' };
@@ -626,6 +749,12 @@ function registerIpc(): void {
     return database ? getAgents(database, pricing, filters) : emptyAgents(filters);
   });
 
+  handle<MachinesDetail>(IPC.getMachinesDetail, (_event, input) => {
+    const filters = parseFilters(input);
+    return database ? getMachinesDetail(database, pricing, filters) : emptyMachinesDetail(filters);
+  });
+
+  handle<SyncStatus>(IPC.getSyncStatus, () => sync.status());
   handle<SettingsData>(IPC.getSettings, () => buildSettings());
   handle<SettingsData>(IPC.setSettings, (_event, patch) => applySettings(patch));
   handle<AddFolderResult>(IPC.addLogFolder, () => addLogFolder());
@@ -633,7 +762,12 @@ function registerIpc(): void {
   handle<void>(IPC.scanNow, () => scanUsage());
   handle<ExportResult>(IPC.exportCsv, (_event, kind, filters) => exportCsv(kind, filters));
   handle<ActionResult>(IPC.rebuildDatabase, () => rebuildDatabase());
-  handle<ActionResult>(IPC.keepHistoryLonger, () => keepHistoryLonger());
+  handle<ActionResult>(IPC.keepHistoryLonger, (_event, days) => keepHistoryLonger(days));
+  handle<ChooseFolderResult>(IPC.chooseSyncFolder, () => chooseSyncFolder());
+  handle<SettingsData>(IPC.useSyncFolder, (_event, folder) => useSyncFolder(folder));
+  handle<void>(IPC.syncNow, () => sync.syncNow());
+  handle<ActionResult>(IPC.removeMachine, (_event, id) => removeMachine(id));
+  handle<void>(IPC.restoreMachine, (_event, id) => sync.restoreMachine(parseMachineIdArgument(id)));
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -674,6 +808,11 @@ if (!app.requestSingleInstanceLock()) {
   app.on('will-quit', () => {
     quitting = true;
     if (rootsTimer) clearInterval(rootsTimer);
+    try {
+      sync.flushOnQuit();
+    } catch (error) {
+      console.warn(`[sync] Could not write on quit: ${errorText(error)}`);
+    }
     void watcher.close();
     database?.close();
     database = null;
