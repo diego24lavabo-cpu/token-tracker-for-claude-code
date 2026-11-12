@@ -13,6 +13,8 @@ interface SegmentedControlProps<T extends string> {
   tone: 'neutral' | 'accent';
   /** `small` fits in a card header. */
   size?: 'normal' | 'small';
+  /** Turns the control off and says why, for a page the choice does not apply to. */
+  disabledReason?: string;
 }
 
 /** A row of mutually exclusive buttons. */
@@ -23,17 +25,32 @@ export function SegmentedControl<T extends string>({
   onChange,
   tone,
   size = 'normal',
+  disabledReason,
 }: SegmentedControlProps<T>) {
-  const className = `segmented segmented--${tone}${size === 'small' ? ' segmented--small' : ''}`;
+  const disabled = disabledReason !== undefined;
+  const className = [
+    'segmented',
+    `segmented--${tone}`,
+    size === 'small' ? 'segmented--small' : '',
+    disabled ? 'is-disabled' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
   return (
-    <div className={className} role="group" aria-label={label}>
+    <div
+      className={className}
+      role="group"
+      aria-label={disabled ? `${label}: ${disabledReason}` : label}
+      title={disabledReason}
+    >
       {options.map((option) => (
         <button
           key={option.value}
           type="button"
           className="segmented-option"
           aria-pressed={option.value === value}
-          title={option.label}
+          title={disabledReason ?? option.label}
+          disabled={disabled}
           onClick={() => onChange(option.value)}
         >
           {option.label}

@@ -1,17 +1,21 @@
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  CALENDAR_DAYS,
   comparePeriods,
+  emptyCalendar,
   emptyModels,
   emptyOverview,
   emptyProjectDetail,
   emptyProjects,
+  getCalendar,
   getModels,
   getOverview,
   getProjectDetail,
   getProjects,
   InvalidRequestError,
   parseFilters,
+  parseMachineIds,
   parseProjectName,
 } from '../electron/aggregate';
 import type { UsageDatabase } from '../electron/db';
@@ -24,6 +28,7 @@ import {
   MAC_FOLDER,
   openMemoryDb,
   SESSION_A,
+  SESSION_B,
   tempDir,
   writeLines,
 } from './helpers';
@@ -573,5 +578,219 @@ describe('getModels', () => {
     const db = openMemoryDb();
     open.push(db);
     expect(getModels(db, PRICING, BOTH_DAYS)).toEqual(emptyModels(BOTH_DAYS));
+  });
+});
+
+describe('getCalendar', () => {
+  /** Every day of the heatmap inside the 12 months, oldest first. */
+  const heatmapDays = (calendar: ReturnType<typeof getCalendar>) =>
+    calendar.heatmap.weeks.flatMap((week) => week.days.filter((day) => day !== null));
+
+  /** The macOS and Windows fixtures together: usage on Sunday 8, Monday 9 and Tuesday 10. */
+  async function bothFixturesDb(): Promise<UsageDatabase> {
+    const db = await fixtureDb();
+    await scanLogs(db, [fixtureRoot('win')]);
+    return db;
+  }
+
+  it('lays the last 365 days out as 53 weeks starting on Monday', async () => {
+    const db = await bothFixturesDb();
+    const { today, heatmap } = getCalendar(db, undefined, EVENING);
+
+    expect(today).toBe('2026-11-10');
+    expect(heatmap.from).toBe('2025-11-11');
+    expect(heatmap.to).toBe('2026-11-10');
+    expect(heatmap.weeks).toHaveLength(53);
+    expect(heatmap.weeks.every((week) => week.days.length === 7)).toBe(true);
+    // 2025-11-11 is a Tuesday: the first column starts with an empty Monday.
+    expect(heatmap.weeks[0]!.start).toBe('2025-11-10');
+    expect(heatmap.weeks[0]!.days[0]).toBeNull();
+    expect(heatmap.weeks[0]!.days[1]!.day).toBe('2025-11-11');
+    // The last column holds Monday 9 and today, then five days still to come.
+    expect(heatmap.weeks.at(-1)!.start).toBe('2026-11-09');
+    expect(heatmap.weeks.at(-1)!.days.map((day) => day?.day ?? null)).toEqual([
+      '2026-11-09',
+      '2026-11-10',
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
+    expect(heatmapDays(getCalendar(db, undefined, EVENING))).toHaveLength(CALENDAR_DAYS);
+  });
+
+  it('adds up to the Overview total over the same range', async () => {
+    const db = await bothFixturesDb();
+    const calendar = getCalendar(db, undefined, EVENING);
+    const days = heatmapDays(calendar);
+    const overview = getOverview(db, PRICING, calendar.heatmap, EVENING);
+
+    const sum = days.reduce((total, day) => total + day.tokens, 0);
+    expect(sum).toBe(overview.kpis.totalTokens);
+    expect(sum).toBe(65134 + 1300);
+    expect(days.filter((day) => day.tokens > 0).map((day) => [day.day, day.tokens])).toEqual([
+      ['2026-11-08', 1300],
+      ['2026-11-09', 3675],
+      ['2026-11-10', 61459],
+    ]);
+    // Every day with usage has at least one session with activity.
+    expect(days.every((day) => day.tokens > 0 === day.sessions > 0)).toBe(true);
+    // The other charts split the same total.
+    const add = (values: number[]) => values.reduce((total, value) => total + value, 0);
+    expect(add(calendar.byWeekday)).toBe(sum);
+    expect(add(calendar.byHour)).toBe(sum);
+    expect(add(calendar.byMonth.map((point) => point.tokens))).toBe(sum);
+  });
+
+  it('puts a Sunday last in the week', async () => {
+    const db = await bothFixturesDb();
+    const { byWeekday, bestWeekday, heatmap } = getCalendar(db, undefined, EVENING);
+    // The Windows fixture is Sunday 2026-11-08.
+    expect(byWeekday).toEqual([3675, 61459, 0, 0, 0, 0, 1300]);
+    expect(bestWeekday).toBe(1);
+    const sundayWeek = heatmap.weeks.at(-2)!;
+    expect(sundayWeek.start).toBe('2026-11-02');
+    expect(sundayWeek.days[6]).toMatchObject({ day: '2026-11-08', tokens: 1300 });
+  });
+
+  it('computes the KPI row', async () => {
+    const db = await bothFixturesDb();
+    const { kpis } = getCalendar(db, undefined, EVENING);
+    expect(kpis).toEqual({
+      activeDays: 3,
+      totalDays: 365,
+      currentStreak: { days: 3, from: '2026-11-08', to: '2026-11-10' },
+      longestStreak: { days: 3, from: '2026-11-08', to: '2026-11-10' },
+      bestDay: { day: '2026-11-10', tokens: 61459 },
+      averagePerActiveDay: (65134 + 1300) / 3,
+    });
+  });
+
+  it('grades the days by quartile of the active days', async () => {
+    const db = await bothFixturesDb();
+    const calendar = getCalendar(db, undefined, EVENING);
+    expect(calendar.heatmap.thresholds).toEqual([3675, 61459, 61459]);
+    const level = (day: string) => heatmapDays(calendar).find((cell) => cell.day === day)!.level;
+    expect(level('2026-11-07')).toBe(0);
+    expect(level('2026-11-08')).toBe(1);
+    expect(level('2026-11-09')).toBe(2);
+    expect(level('2026-11-10')).toBe(4);
+  });
+
+  it('counts streaks across gaps, inside the 12 months only', async () => {
+    const root = path.join(tempDir(), 'projects');
+    const days = [
+      // Ten days in a row, more than a year ago: outside the calendar.
+      ...Array.from({ length: 10 }, (_, i) => `2025-01-${String(i + 1).padStart(2, '0')}`),
+      // Four days in a row, then a gap, then two runs of two days.
+      '2026-10-01',
+      '2026-10-02',
+      '2026-10-03',
+      '2026-10-04',
+      '2026-10-20',
+      '2026-10-21',
+      '2026-11-09',
+      '2026-11-10',
+    ];
+    writeLines(
+      path.join(root, MAC_FOLDER, `${SESSION_A}.jsonl`),
+      days.map((day, i) => assistantLine({ id: `d${i}`, ts: `${day}T12:00:00.000Z` })),
+    );
+    const db = openMemoryDb();
+    open.push(db);
+    await scanLogs(db, [root]);
+
+    const at = (now: string) => getCalendar(db, undefined, Date.parse(now)).kpis;
+    const tuesday = at('2026-11-10T20:00:00Z');
+    expect(tuesday.activeDays).toBe(8);
+    expect(tuesday.longestStreak).toEqual({ days: 4, from: '2026-10-01', to: '2026-10-04' });
+    expect(tuesday.currentStreak).toEqual({ days: 2, from: '2026-11-09', to: '2026-11-10' });
+    // Today still empty: the streak ends yesterday.
+    expect(at('2026-11-11T08:00:00Z').currentStreak).toEqual({
+      days: 2,
+      from: '2026-11-09',
+      to: '2026-11-10',
+    });
+    expect(at('2026-11-12T08:00:00Z').currentStreak).toBeNull();
+    // On 2025-01-08 the ten-day run is inside the calendar, and still going.
+    const january = at('2025-01-08T20:00:00Z');
+    expect(january.longestStreak).toEqual({ days: 8, from: '2025-01-01', to: '2025-01-08' });
+    expect(january.currentStreak).toEqual({ days: 8, from: '2025-01-01', to: '2025-01-08' });
+    // A year later, October 1-3 have left the calendar: of the two runs of two days, the
+    // latest wins.
+    const nextYear = at('2027-10-03T20:00:00Z');
+    expect(nextYear.activeDays).toBe(5);
+    expect(nextYear.longestStreak).toEqual({ days: 2, from: '2026-11-09', to: '2026-11-10' });
+    expect(nextYear.currentStreak).toBeNull();
+  });
+
+  it('counts a session on every day it has activity', async () => {
+    const root = path.join(tempDir(), 'projects');
+    writeLines(path.join(root, MAC_FOLDER, `${SESSION_A}.jsonl`), [
+      assistantLine({ id: 'a1', ts: '2026-11-09T23:50:00.000Z' }),
+      assistantLine({ id: 'a2', ts: '2026-11-10T00:10:00.000Z' }),
+    ]);
+    writeLines(path.join(root, MAC_FOLDER, `${SESSION_B}.jsonl`), [
+      assistantLine({ id: 'b1', session: SESSION_B, ts: '2026-11-10T09:00:00.000Z' }),
+    ]);
+    const db = openMemoryDb();
+    open.push(db);
+    await scanLogs(db, [root]);
+
+    const sessionsOn = (calendar: ReturnType<typeof getCalendar>, day: string) =>
+      heatmapDays(calendar).find((cell) => cell.day === day)!.sessions;
+    const calendar = getCalendar(db, undefined, EVENING);
+    expect(sessionsOn(calendar, '2026-11-09')).toBe(1);
+    expect(sessionsOn(calendar, '2026-11-10')).toBe(2);
+    // Other machines have no per-day sessions yet.
+    expect(sessionsOn(getCalendar(db, ['another-machine'], EVENING), '2026-11-10')).toBe(0);
+  });
+
+  it('splits the year by hour and by calendar month', async () => {
+    const db = await bothFixturesDb();
+    const { byHour, byMonth } = getCalendar(db, undefined, EVENING);
+    expect(byHour).toHaveLength(24);
+    expect(byMonth.map((point) => point.month)).toEqual([
+      '2025-12',
+      '2026-01',
+      '2026-02',
+      '2026-03',
+      '2026-04',
+      '2026-05',
+      '2026-06',
+      '2026-07',
+      '2026-08',
+      '2026-09',
+      '2026-10',
+      '2026-11',
+    ]);
+    expect(byMonth.at(-1)!.tokens).toBe(65134 + 1300);
+    // The Windows session runs from 09:59 to 10:06 UTC.
+    expect(byHour[9]! + byHour[10]!).toBeGreaterThanOrEqual(1300);
+  });
+
+  it('follows the machine filter', async () => {
+    const db = await bothFixturesDb();
+    expect(heatmapDays(getCalendar(db, [db.machineId], EVENING)).length).toBe(CALENDAR_DAYS);
+    expect(getCalendar(db, [db.machineId], EVENING).kpis.activeDays).toBe(3);
+    const other = getCalendar(db, ['another-machine'], EVENING);
+    expect(other).toEqual(emptyCalendar('2026-11-10'));
+    expect(getCalendar(db, [], EVENING).hasData).toBe(false);
+  });
+
+  it('describes an empty database', () => {
+    const db = openMemoryDb();
+    open.push(db);
+    const calendar = getCalendar(db, undefined, EVENING);
+    expect(calendar).toEqual(emptyCalendar('2026-11-10'));
+    expect(heatmapDays(calendar)).toHaveLength(CALENDAR_DAYS);
+  });
+
+  it('checks the machine list', () => {
+    expect(parseMachineIds(undefined)).toBeUndefined();
+    expect(parseMachineIds(['a', 'b'])).toEqual(['a', 'b']);
+    expect(() => parseMachineIds('a')).toThrow(InvalidRequestError);
+    expect(() => parseMachineIds([1])).toThrow(InvalidRequestError);
   });
 });

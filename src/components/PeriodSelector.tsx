@@ -4,8 +4,11 @@ import { SegmentedControl } from './SegmentedControl';
 
 const OPTIONS = PERIODS.map((period) => ({ value: period, label: en.header.periods[period] }));
 
-/** `7d | 30d | 90d | 1y`. Applies to every section. */
-export function PeriodSelector() {
+/**
+ * `7d | 30d | 90d | 1y`. Applies to every section but the Calendar, which turns it off
+ * with `disabledReason`.
+ */
+export function PeriodSelector({ disabledReason }: { disabledReason?: string }) {
   const { period, setPeriod } = useFilters();
 
   return (
@@ -15,6 +18,7 @@ export function PeriodSelector() {
       value={period}
       onChange={setPeriod}
       tone="accent"
+      disabledReason={disabledReason}
     />
   );
 }

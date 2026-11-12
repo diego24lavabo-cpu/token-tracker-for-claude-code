@@ -16,10 +16,12 @@ interface HourBarsProps {
   /** 24 values, local hours 0 to 23. */
   hours: readonly number[];
   label: string;
+  /** The tooltip row with each hour's share. Default: share of the day. */
+  shareLabel?: string;
 }
 
 /** Tokens per hour of the day: 24 bars. */
-export function HourBars({ hours, label }: HourBarsProps) {
+export function HourBars({ hours, label, shareLabel = en.charts.ofTotal }: HourBarsProps) {
   const total = hours.reduce((sum, value) => sum + value, 0);
   const data: HourPoint[] = hours.map((tokens, hour) => ({
     hour,
@@ -47,7 +49,11 @@ export function HourBars({ hours, label }: HourBarsProps) {
             tickMargin={8}
           />
           <YAxis domain={[0, top]} hide />
-          <Tooltip content={<HourTooltip />} cursor={BAR_CURSOR} isAnimationActive={false} />
+          <Tooltip
+            content={<HourTooltip shareLabel={shareLabel} />}
+            cursor={BAR_CURSOR}
+            isAnimationActive={false}
+          />
           <Bar
             dataKey="tokens"
             fill={CHART_COLORS.accent}
@@ -61,17 +67,18 @@ export function HourBars({ hours, label }: HourBarsProps) {
 }
 
 interface HourTooltipProps {
+  shareLabel: string;
   active?: boolean;
   payload?: ReadonlyArray<{ payload?: HourPoint }>;
 }
 
-function HourTooltip({ active, payload }: HourTooltipProps) {
+function HourTooltip({ shareLabel, active, payload }: HourTooltipProps) {
   const point = payload?.[0]?.payload;
   if (!active || !point) return null;
   return (
     <ChartTooltip title={en.charts.hourRange(point.hour)}>
       <TooltipRow label={en.charts.tokens} value={formatTokens(point.tokens)} strong />
-      <TooltipRow label={en.charts.ofTotal} value={formatPercent(point.share)} />
+      <TooltipRow label={shareLabel} value={formatPercent(point.share)} />
     </ChartTooltip>
   );
 }

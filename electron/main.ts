@@ -4,8 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { IPC } from '../shared/ipc';
+import { localDay } from '../shared/period';
 import type {
   AppInfo,
+  Calendar,
   Machine,
   Models,
   Overview,
@@ -15,15 +17,18 @@ import type {
   Projects,
 } from '../shared/types';
 import {
+  emptyCalendar,
   emptyModels,
   emptyOverview,
   emptyProjectDetail,
   emptyProjects,
+  getCalendar,
   getModels,
   getOverview,
   getProjectDetail,
   getProjects,
   parseFilters,
+  parseMachineIds,
   parseProjectName,
 } from './aggregate';
 import { UsageDatabase } from './db';
@@ -225,6 +230,11 @@ function registerIpc(): void {
   handle<Models>(IPC.getModels, (_event, input) => {
     const filters = parseFilters(input);
     return database ? getModels(database, pricing, filters) : emptyModels(filters);
+  });
+
+  handle<Calendar>(IPC.getCalendar, (_event, input) => {
+    const machineIds = parseMachineIds(input);
+    return database ? getCalendar(database, machineIds) : emptyCalendar(localDay(new Date()));
   });
 }
 

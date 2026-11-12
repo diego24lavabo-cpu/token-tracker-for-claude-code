@@ -3,7 +3,7 @@
  * the system: `12.4M`, `412k`, `$7.90`, `Nov 10`.
  */
 
-import { daysInRange } from '../../shared/period';
+import { daysInRange, weekStart } from '../../shared/period';
 import { en } from '../i18n/en';
 
 const LOCALE = 'en-US';
@@ -106,6 +106,8 @@ export function formatPercent(ratio: number, options: PercentOptions = {}): stri
 interface DayOptions {
   /** Append the year: `Nov 10, 2026`. */
   year?: boolean;
+  /** Start with the weekday: `Tue, Nov 10`. */
+  weekday?: boolean;
 }
 
 /**
@@ -116,8 +118,19 @@ export function formatDay(day: string, options: DayOptions = {}): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
   const month = match ? MONTHS[Number(match[2]) - 1] : undefined;
   if (!match || !month) return PLACEHOLDER;
-  const label = `${month} ${Number(match[3])}`;
-  return options.year ? `${label}, ${match[1]}` : label;
+  let label = `${month} ${Number(match[3])}`;
+  if (options.year) label = `${label}, ${match[1]}`;
+  if (options.weekday)
+    label = `${en.dates.weekdays[daysInRange(weekStart(day), day) - 1]}, ${label}`;
+  return label;
+}
+
+/** A month `YYYY-MM` as `Nov`, or `Nov 2026` with the year. */
+export function formatMonth(month: string, options: { year?: boolean } = {}): string {
+  const match = /^(\d{4})-(\d{2})$/.exec(month);
+  const name = match ? MONTHS[Number(match[2]) - 1] : undefined;
+  if (!match || !name) return PLACEHOLDER;
+  return options.year ? `${name} ${match[1]}` : name;
 }
 
 /**

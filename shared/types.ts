@@ -275,6 +275,95 @@ export interface Models {
   weeklyModels: string[];
 }
 
+// ── Calendar ──────────────────────────────────────────────────────────────────
+
+/** Heat of a heatmap cell: 0 = no usage, then 1 to 4 by quartile of the active days. */
+export type HeatLevel = 0 | 1 | 2 | 3 | 4;
+
+/** One day of the heatmap. */
+export interface HeatmapDay {
+  /** Local day, `YYYY-MM-DD`. */
+  day: string;
+  /** All token types. */
+  tokens: number;
+  /**
+   * Sessions with activity that day, subagents included: a session that runs past midnight
+   * counts on both days. Local machine only until sync (step 10) brings the others.
+   */
+  sessions: number;
+  level: HeatLevel;
+}
+
+/** One column of the heatmap: a week, Monday to Sunday. */
+export interface HeatmapWeek {
+  /** The Monday, `YYYY-MM-DD`. */
+  start: string;
+  /** 7 entries, Monday first. Null for the days outside the 12 months (before or after). */
+  days: (HeatmapDay | null)[];
+}
+
+export interface Heatmap {
+  /** First and last day of the 12 months (365 days ending today), both included. */
+  from: string;
+  to: string;
+  /** 53 weeks, oldest first; the last one holds today. */
+  weeks: HeatmapWeek[];
+  /**
+   * The smallest tokens of levels 2, 3 and 4. Level 1 is any day with usage below the
+   * first one. Empty when no day has usage.
+   */
+  thresholds: number[];
+}
+
+/** A run of consecutive days with usage. */
+export interface Streak {
+  days: number;
+  /** First and last day, `YYYY-MM-DD`. */
+  from: string;
+  to: string;
+}
+
+export interface CalendarKpis {
+  /** Days with usage in the 12 months, out of `totalDays` (365). */
+  activeDays: number;
+  totalDays: number;
+  /** Consecutive days with usage up to today, or up to yesterday while today is empty. */
+  currentStreak: Streak | null;
+  /** The longest run inside the 12 months; the most recent one on a tie. */
+  longestStreak: Streak | null;
+  /** The day with the most tokens; the most recent one on a tie. */
+  bestDay: { day: string; tokens: number } | null;
+  /** Tokens per active day. Null without active days. */
+  averagePerActiveDay: number | null;
+}
+
+/** Tokens of one calendar month. */
+export interface MonthPoint {
+  /** `YYYY-MM`. */
+  month: string;
+  tokens: number;
+}
+
+export interface Calendar {
+  /** False when the database holds no usage at all, for the selected machines. */
+  hasData: boolean;
+  /** Today's local day, as the main process sees it. */
+  today: string;
+  heatmap: Heatmap;
+  kpis: CalendarKpis;
+  /** 7 values over the 12 months: tokens per weekday, Monday first. */
+  byWeekday: number[];
+  /** Index in `byWeekday` of the weekday with the most tokens. Null without usage. */
+  bestWeekday: number | null;
+  /** 24 values over the 12 months: tokens per local hour, 0 to 23. */
+  byHour: number[];
+  /**
+   * The 12 calendar months that end with the current one, oldest first. The current month
+   * is partial, and the first one starts on its 1st, a little after the heatmap's `from`.
+   */
+  byMonth: MonthPoint[];
+}
+
 /** The API exposed to the renderer as `window.api` by the preload script. */
 export interface Api {
   /** Available synchronously so the title bar can lay out on first paint. */
@@ -285,6 +374,8 @@ export interface Api {
   getProjects(filters: Filters): Promise<Projects>;
   getProjectDetail(project: string, filters: Filters): Promise<ProjectDetail>;
   getModels(filters: Filters): Promise<Models>;
+  /** The last 12 months, whatever the period. Follows the machine filter only. */
+  getCalendar(machineIds?: string[]): Promise<Calendar>;
   /** Subscribes to "usage data changed" events. Returns an unsubscribe function. */
   onUsageUpdated(callback: () => void): () => void;
 }

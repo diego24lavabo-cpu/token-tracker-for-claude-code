@@ -11,6 +11,7 @@ Status of the build plan in [SPEC.md](SPEC.md) §8. Read this first when resumin
 | 3. IPC API + Overview          | `380bda0` + follow-up | `getOverview`, KPI cards, daily chart, shortcut cards, cost estimate          |
 | 4. Projects page               | `92776dd`             | `getProjects`, `getProjectDetail`, sortable `DataTable`, analysis panel       |
 | 5. Models page                 | `6e79f86` + follow-up | `getModels`, model cards, weekly share (12 weeks), token types per model      |
+| 6. Calendar page               | (this commit)         | `getCalendar`, 12-month heatmap, streak KPIs, weekday / hour / month charts   |
 
 CI (lint, typecheck, tests on macOS and Windows) is green up to `e018d16`.
 
@@ -73,10 +74,25 @@ CI (lint, typecheck, tests on macOS and Windows) is green up to `e018d16`.
 - No KPI row: the spec and the mockup have none on this page.
 - `TooltipRow` takes a `color` for swatches without a theme class.
 
+**Calendar page**
+
+- `getCalendar(machineIds?)` returns `{ hasData, today, heatmap, kpis, byWeekday, bestWeekday, byHour, byMonth }`. Only the machine filter applies. The main process decides today (`db.localDay(now)`) and sends it back; the page refetches when `useToday` changes, so the calendar rolls over at midnight.
+- The 12 months = 365 days ending today (`today - 364` to today). They always span exactly 53 Monday-first weeks, because `today - 364` is the same weekday as today. `heatmap.weeks[i].days` has 7 entries, `null` for the days before the range (start of the first column) and after today (end of the last). Heatmap total = Overview total over `heatmap.from`…`heatmap.to` (tested).
+- Heat levels are computed in the main process: 0 = no usage, 1 to 4 by quartile of the active days (`thresholds` = where levels 2, 3, 4 start). Quartiles rather than a share of the maximum, so one huge day does not turn every other day into level 1. The legend swatches give the token range of each level in their tooltip.
+- KPIs: active days x / 365. The current streak is the same rule as the Overview (from yesterday while today is empty), now returned as `{ days, from, to }`; `currentStreak` in `aggregate.ts` returns that object and the Overview keeps `.days`. It also ignores `hourly` rows with 0 tokens now. The longest streak is counted inside the 365 days only (a run that started before is cut). Ties go to the most recent run and the most recent best day.
+- By weekday and by hour cover the 365 days. By month covers the 12 calendar months ending with the current one (Dec 2025 to Nov 2026 on 2026-11-12): the first month starts on its 1st, a little after the heatmap's `from`, and the current month is partial ("so far" in its tooltip). The busiest weekday (`bestWeekday`, chosen in the main process) is drawn in `--accent-light` and named in the card header.
+- Sessions per heatmap day = sessions **with activity that day**, subagents included, from `messages` (`COUNT(DISTINCT session_id)` per `local_day`). A session that runs past midnight counts on both days. Start-day counting showed "55.5M tokens, 0 sessions" on real data. `messages` holds only this machine's responses, so another machine's filter gives 0 sessions per day until sync carries them (see Database below).
+- Clicking a day with usage navigates to `/sessions?day=YYYY-MM-DD` (`sessionsOfDay()` and `SESSIONS_DAY_PARAM` in `src/routes.ts`). Days without usage do nothing (`aria-disabled`).
+- Heatmap UI (`src/components/Heatmap.tsx`): a CSS grid of `<button>`s with roving focus. The grid is one tab stop; the arrow keys move by a day (up/down) or a week (left/right), Home/End go to the first day / today. The tooltip opens on hover, and on keyboard focus only (`:focus-visible`), so a mouse click does not leave it stuck open. It sits above the cell, or below it when the card has no room above, and is kept inside the card horizontally. Today has a thin white inner border. Month labels sit over the column holding the 1st of the month, plus the first column when the next label is at least 3 columns away. Cells grow with the width, up to about 30 px (they fill a maximized 1920 px window).
+- The header's period selector is disabled on this page (greyed, tooltip "The calendar always shows the last 12 months"): `Page periodIgnored`, `SegmentedControl disabledReason`.
+- Layout: the three charts sit side by side from 1280 px (weekday, hour, month); below that, weekday and hour share a row and the months take the next one.
+- New reusable pieces: `CategoryBars` (one labeled bar per category, optional highlight), `formatDay(day, { weekday: true })` → `Tue, Nov 10`, `formatMonth`, `en.dates.weekdays` / `weekdaysLong`. `HourBars` takes a `shareLabel`.
+
 **Database**
 
 - Schema version 4. Versions 2 and 3 empty the `files` table so the transcripts still on disk are read again to fill the new columns. Version 4 adds `session_projects` and rebuilds the derived tables from `messages` (checked on a real version-3 database).
 - Sync (step 10): the `sessions` rows of the sync format carry one project. To keep per-project session counts for other machines, they will also need the list of projects of each session (with tokens), or a `sessionProjects` array.
+- Sync (step 10): the heatmap counts sessions with activity per day from `messages`, which the sync format does not have. The sync files will need per-day session activity (for example the active days of each session) for other machines' heatmap tooltips and the Sessions day filter.
 
 ## Open points
 
@@ -86,13 +102,13 @@ CI (lint, typecheck, tests on macOS and Windows) is green up to `e018d16`.
 - Prices must be verified before release.
 - File watching is not in yet (step 9): the app scans only at startup.
 
-## Step 6 starts here: Calendar page
+## Step 7 starts here: Sessions page
 
-Spec: SPEC.md §5, Calendar. Suggested effort: `high`.
+Spec: SPEC.md §5, Sessions. Suggested effort: `high`.
 
-1. Same path as `getModels`: types in `shared/types.ts`, a channel in `shared/ipc.ts`, `preload.ts`, a `handle()` in `electron/main.ts` with an `empty*` fallback. SPEC §6 signature: `getCalendar(machineIds?)`; it ignores the period but follows the machine filter. It needs today's local day: pass `now` like `getOverview` (`db.localDay(now)`).
-2. `getCalendar` in `electron/aggregate.ts`: heatmap of the last 12 months (53 columns × 7 rows, weeks start Monday: reuse `weekStart`), KPIs (active days x/365, current streak: reuse `currentStreak`, longest streak, best day, average per active day), tokens by weekday, by hour (24) and by month (12).
-3. UI in `src/pages/Calendar.tsx`: a custom CSS-grid heatmap (ramp `--heat-0` to `--heat-4`, month and day labels, "Less → More" legend, a tooltip per cell). Reuse `KpiCard` (`kpi-grid--5`), `HourBars`, `ChartTooltip`. Best weekday in `--accent-light`. Clicking a day opens Sessions filtered to that day: the Sessions page comes in step 7, so navigate with the day in the route and let step 7 read it.
-4. Tests in `tests/aggregate.test.ts`: the heatmap days add up to the Overview total over the same range; streaks across a gap; weekday of a Sunday (fixture 2026-11-08, `win` root).
+1. Same path as `getModels` / `getCalendar`: types in `shared/types.ts`, a channel in `shared/ipc.ts`, `preload.ts`, a `handle()` in `electron/main.ts` with an `empty*` fallback. SPEC §6 signatures: `getSessions(f, page, sort)` and `getSessionDetail(sessionId)`.
+2. The day filter comes from the Calendar: read `?day=YYYY-MM-DD` with `SESSIONS_DAY_PARAM` from `src/routes.ts` (`useSearchParams`). Show it as a removable filter chip. It should keep the Calendar's meaning, sessions **with activity that day** (`messages.local_day`), so the count in the heatmap tooltip matches the rows the click opens. Decide how the day filter combines with the header period (the day probably overrides it).
+3. KPIs, size and duration histograms, the paginated sortable table (`DataTable`, `src/lib/sort.ts`) and the detail drawer (main vs subagent tokens, then the timeline of subagent invocations). Durations are active time (see "Numbers" above), the first-to-last span only in the drawer.
+4. Tests in `tests/aggregate.test.ts`: session totals include their subagents and add up to the Overview total; pagination and sort; the day filter, including a session that runs past midnight.
 
 Run tests from PowerShell: under Git Bash, vitest loads twice (drive letter case) and fails with "failed to find the current suite". Bash heredocs that contain quotes also fail in this shell: write files with the editor tools instead.

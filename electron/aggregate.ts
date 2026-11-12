@@ -13,7 +13,13 @@ import {
 } from '../shared/period';
 import type {
   AgentKind,
+  Calendar,
+  CalendarKpis,
   DailyPoint,
+  HeatLevel,
+  HeatmapDay,
+  HeatmapWeek,
+  MonthPoint,
   Filters,
   MainSubagentPoint,
   ModelCard,
@@ -26,6 +32,7 @@ import type {
   ProjectDetail,
   ProjectRow,
   Projects,
+  Streak,
 } from '../shared/types';
 import type { UsageDatabase } from './db';
 import { costOf } from './pricing';
@@ -243,27 +250,27 @@ function hasAnyUsage(db: UsageDatabase, machineIds?: string[]): boolean {
 
 /**
  * Consecutive days with usage, counted back from today. A day that has not seen any
- * usage yet does not break the streak: it then ends yesterday.
+ * usage yet does not break the streak: it then ends yesterday. Null without such a run.
  */
-function currentStreak(db: UsageDatabase, today: string, machineIds?: string[]): number {
-  const where: Where = { sql: 'local_day <= ?', params: [today] };
+function currentStreak(db: UsageDatabase, today: string, machineIds?: string[]): Streak | null {
+  const where: Where = { sql: `local_day <= ? AND ${TOKENS} > 0`, params: [today] };
   inList('machine_id', machineIds, where);
   const days = db.raw
     .prepare(`SELECT DISTINCT local_day FROM hourly WHERE ${where.sql} ORDER BY local_day DESC`)
     .pluck()
     .iterate(...where.params) as IterableIterator<string>;
 
-  let streak = 0;
+  let streak = null as Streak | null;
   let expected = today;
   for (const day of days) {
     if (day !== expected) {
-      if (streak === 0 && day === addDays(today, -1)) {
+      if (!streak && day === addDays(today, -1)) {
         expected = day;
       } else {
         break;
       }
     }
-    streak++;
+    streak = { days: (streak?.days ?? 0) + 1, from: day, to: streak?.to ?? day };
     expected = addDays(expected, -1);
   }
   return streak;
@@ -374,7 +381,7 @@ export function getOverview(
         : null,
       model: mainModel,
       activity: {
-        currentStreak: currentStreak(db, db.localDay(now), filters.machineIds),
+        currentStreak: currentStreak(db, db.localDay(now), filters.machineIds)?.days ?? 0,
         activeDays,
         periodDays: daysInRange(filters.from, filters.to),
       },
@@ -789,5 +796,217 @@ export function emptyModels(filters: Filters): Models {
     cards: [],
     weekly: lastWeeks(filters.to, WEEKLY_WEEKS).map((week) => ({ week, tokens: [] })),
     weeklyModels: [],
+  };
+}
+
+// ── Calendar ──────────────────────────────────────────────────────────────────
+
+/** The calendar covers today and the days before it, this many in all. */
+export const CALENDAR_DAYS = 365;
+/** Columns of the heatmap. 365 days ending today always span exactly 53 Monday weeks. */
+export const HEATMAP_WEEKS = 53;
+const MONTHS = 12;
+
+/** Checks the machine list of `getCalendar` received over IPC. */
+export function parseMachineIds(value: unknown): string[] | undefined {
+  return stringList(value, 'machineIds');
+}
+
+/** The first and last day of the calendar: 365 days ending today. */
+function calendarRange(today: string): { from: string; to: string } {
+  return { from: addDays(today, 1 - CALENDAR_DAYS), to: today };
+}
+
+/** `YYYY-MM` of the 12 calendar months ending with the month of `today`, oldest first. */
+function lastMonths(today: string): string[] {
+  const year = Number(today.slice(0, 4));
+  const month = Number(today.slice(5, 7)) - 1;
+  return Array.from({ length: MONTHS }, (_, index) => {
+    const offset = year * 12 + month - (MONTHS - 1) + index;
+    return `${Math.floor(offset / 12)}-${String((offset % 12) + 1).padStart(2, '0')}`;
+  });
+}
+
+/** Monday = 0 … Sunday = 6. */
+function weekdayOf(day: string): number {
+  return daysInRange(weekStart(day), day) - 1;
+}
+
+/**
+ * Where levels 2, 3 and 4 start: the quartiles of the active days' tokens. Quartiles keep
+ * one big day from turning every other day into level 1.
+ */
+function heatThresholds(activeTokens: readonly number[]): number[] {
+  if (activeTokens.length === 0) return [];
+  const sorted = [...activeTokens].sort((a, b) => a - b);
+  const n = sorted.length;
+  return [1, 2, 3].map((k) => sorted[Math.min(n - 1, Math.ceil((n * k) / 4))]!);
+}
+
+function heatLevel(tokens: number, thresholds: readonly number[]): HeatLevel {
+  if (tokens <= 0) return 0;
+  let level = 1;
+  for (const threshold of thresholds) {
+    if (tokens >= threshold) level++;
+  }
+  return level as HeatLevel;
+}
+
+/** The 53 weeks of the heatmap, with null for the days outside `from` … `to`. */
+function heatmapWeeks(from: string, to: string, dayOf: (day: string) => HeatmapDay): HeatmapWeek[] {
+  const first = weekStart(from);
+  return Array.from({ length: HEATMAP_WEEKS }, (_, week) => {
+    const start = addDays(first, 7 * week);
+    return {
+      start,
+      days: Array.from({ length: 7 }, (_, weekday) => {
+        const day = addDays(start, weekday);
+        return day < from || day > to ? null : dayOf(day);
+      }),
+    };
+  });
+}
+
+/** The longest run of consecutive days in an ascending list; the latest one on a tie. */
+function longestRun(days: readonly string[]): Streak | null {
+  // `as` keeps the declared type: an annotation would narrow both to `null` in the loop.
+  let best = null as Streak | null;
+  let run = null as Streak | null;
+  for (const day of days) {
+    run =
+      run && addDays(run.to, 1) === day
+        ? { days: run.days + 1, from: run.from, to: day }
+        : { days: 1, from: day, to: day };
+    if (!best || run.days >= best.days) best = run;
+  }
+  return best;
+}
+
+/**
+ * The Calendar page: the last 12 months, whatever the period. Only the machine filter
+ * applies. `now` is the current instant; it decides which day is today.
+ */
+export function getCalendar(
+  db: UsageDatabase,
+  machineIds?: string[],
+  now: number = Date.now(),
+): Calendar {
+  const today = db.localDay(now);
+  const { from, to } = calendarRange(today);
+  const raw = db.raw;
+  const range: Filters = { from, to, machineIds };
+  const where = hourlyWhere(range);
+
+  const dayRows = raw
+    .prepare(
+      `SELECT local_day AS day, SUM(${TOKENS}) AS tokens
+       FROM hourly WHERE ${where.sql} GROUP BY local_day HAVING tokens > 0 ORDER BY local_day`,
+    )
+    .all(...where.params) as { day: string; tokens: number }[];
+  // Sessions with activity that day, subagents included, so a session that runs past
+  // midnight counts on both days. `messages` holds this machine's responses only.
+  const sessionRows =
+    !machineIds || machineIds.includes(db.machineId)
+      ? (raw
+          .prepare(
+            `SELECT local_day AS day, COUNT(DISTINCT session_id) AS count FROM messages
+             WHERE local_day BETWEEN ? AND ? GROUP BY local_day`,
+          )
+          .all(from, to) as { day: string; count: number }[])
+      : [];
+
+  const tokensByDay = new Map(dayRows.map((row) => [row.day, row.tokens]));
+  const sessionsByDay = new Map(sessionRows.map((row) => [row.day, row.count]));
+  const thresholds = heatThresholds(dayRows.map((row) => row.tokens));
+  const weeks = heatmapWeeks(from, to, (day) => {
+    const tokens = tokensByDay.get(day) ?? 0;
+    return {
+      day,
+      tokens,
+      sessions: sessionsByDay.get(day) ?? 0,
+      level: heatLevel(tokens, thresholds),
+    };
+  });
+
+  const byWeekday = Array.from({ length: 7 }, () => 0);
+  let total = 0;
+  let bestDay: CalendarKpis['bestDay'] = null;
+  for (const row of dayRows) {
+    byWeekday[weekdayOf(row.day)]! += row.tokens;
+    total += row.tokens;
+    // Days come in ascending order, so `>=` keeps the latest of equal days.
+    if (!bestDay || row.tokens >= bestDay.tokens) bestDay = { day: row.day, tokens: row.tokens };
+  }
+  let bestWeekday: number | null = null;
+  byWeekday.forEach((tokens, index) => {
+    if (tokens > 0 && (bestWeekday === null || tokens > byWeekday[bestWeekday]!)) {
+      bestWeekday = index;
+    }
+  });
+
+  const hourRows = raw
+    .prepare(
+      `SELECT local_hour AS hour, SUM(${TOKENS}) AS tokens
+       FROM hourly WHERE ${where.sql} GROUP BY local_hour`,
+    )
+    .all(...where.params) as { hour: number; tokens: number }[];
+  const byHour = Array.from({ length: 24 }, () => 0);
+  for (const row of hourRows) {
+    if (row.hour >= 0 && row.hour < 24) byHour[row.hour] = row.tokens;
+  }
+
+  const months = lastMonths(today);
+  const monthWhere = hourlyWhere({ from: `${months[0]}-01`, to, machineIds });
+  const monthRows = raw
+    .prepare(
+      `SELECT substr(local_day, 1, 7) AS month, SUM(${TOKENS}) AS tokens
+       FROM hourly WHERE ${monthWhere.sql} GROUP BY month`,
+    )
+    .all(...monthWhere.params) as MonthPoint[];
+  const tokensByMonth = new Map(monthRows.map((row) => [row.month, row.tokens]));
+
+  return {
+    hasData: hasAnyUsage(db, machineIds),
+    today,
+    heatmap: { from, to, weeks, thresholds },
+    kpis: {
+      activeDays: dayRows.length,
+      totalDays: CALENDAR_DAYS,
+      currentStreak: currentStreak(db, today, machineIds),
+      longestStreak: longestRun(dayRows.map((row) => row.day)),
+      bestDay,
+      averagePerActiveDay: dayRows.length > 0 ? total / dayRows.length : null,
+    },
+    byWeekday,
+    bestWeekday,
+    byHour,
+    byMonth: months.map((month) => ({ month, tokens: tokensByMonth.get(month) ?? 0 })),
+  };
+}
+
+/** What the Calendar page shows when there is no database to read. */
+export function emptyCalendar(today: string): Calendar {
+  const { from, to } = calendarRange(today);
+  return {
+    hasData: false,
+    today,
+    heatmap: {
+      from,
+      to,
+      weeks: heatmapWeeks(from, to, (day) => ({ day, tokens: 0, sessions: 0, level: 0 })),
+      thresholds: [],
+    },
+    kpis: {
+      activeDays: 0,
+      totalDays: CALENDAR_DAYS,
+      currentStreak: null,
+      longestStreak: null,
+      bestDay: null,
+      averagePerActiveDay: null,
+    },
+    byWeekday: Array.from({ length: 7 }, () => 0),
+    bestWeekday: null,
+    byHour: Array.from({ length: 24 }, () => 0),
+    byMonth: lastMonths(today).map((month) => ({ month, tokens: 0 })),
   };
 }

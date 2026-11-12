@@ -231,6 +231,64 @@ export const en = {
     },
   },
 
+  calendar: {
+    kpi: {
+      active: 'Active days (12 months)',
+      activeHint: (share: string) => `${share} of days`,
+      current: 'Current streak',
+      currentSince: (day: string) => `since ${day}`,
+      currentUntilYesterday: (day: string) => `since ${day}, until yesterday`,
+      noCurrent: 'no usage today or yesterday',
+      longest: 'Longest streak',
+      longestRange: (from: string, to: string) => `${from} – ${to}`,
+      longestHint: 'over 12 months',
+      best: 'Best day',
+      average: 'Average per active day',
+      averageHint: 'over 12 months',
+      none: 'no usage in 12 months',
+    },
+    days: (count: number) => (count === 1 ? '1 day' : `${count} days`),
+    heatmap: {
+      title: 'Last 12 months',
+      hint: 'Select a day to open its sessions',
+      label:
+        'Tokens per day over the last 12 months, one column per week. Use the arrow keys to move between days.',
+      less: 'Less',
+      more: 'More',
+      today: 'Today',
+      tokens: 'Tokens',
+      sessions: 'Sessions',
+      open: 'Click to open its sessions',
+      noUsage: 'No usage',
+      cell: (day: string, tokens: string, sessions: number) =>
+        `${day}: ${tokens} tokens, ${sessions === 1 ? '1 session' : `${sessions} sessions`}`,
+      cellEmpty: (day: string) => `${day}: no usage`,
+      level: {
+        0: 'No usage',
+        1: (below: string) => `Under ${below} tokens`,
+        range: (from: string, to: string) => `${from} to ${to} tokens`,
+        top: (from: string) => `${from} tokens or more`,
+        empty: 'No day at this level',
+      },
+    },
+    weekday: {
+      title: 'By weekday',
+      label: 'Tokens per weekday over the last 12 months',
+      busiest: 'Busiest',
+    },
+    hour: {
+      title: 'By hour of day',
+      label: 'Tokens per hour of the day over the last 12 months',
+    },
+    month: {
+      title: 'By month',
+      label: 'Tokens per month over the last 12 months',
+      soFar: 'so far',
+    },
+    share: 'Share of the 12 months',
+    periodIgnored: 'The calendar always shows the last 12 months',
+  },
+
   /** Display names of agent types and kinds. */
   agents: {
     asideType: '/btw',
@@ -256,6 +314,8 @@ export const en = {
   },
 
   dates: {
+    weekdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+    weekdaysLong: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
     today: 'Today',
     yesterday: 'Yesterday',
     daysAgo: (days: number) => `${days} days ago`,

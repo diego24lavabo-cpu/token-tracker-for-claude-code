@@ -17,3 +17,14 @@ export const SECTIONS: readonly Section[] = [
   { id: 'machines', path: '/machines' },
   { id: 'settings', path: '/settings' },
 ];
+
+/** The query parameter of the Sessions page that limits it to one local day (`YYYY-MM-DD`). */
+export const SESSIONS_DAY_PARAM = 'day';
+
+/** The Sessions page filtered to one local day. */
+export function sessionsOfDay(day: string): { pathname: string; search: string } {
+  return {
+    pathname: '/sessions',
+    search: `?${new URLSearchParams({ [SESSIONS_DAY_PARAM]: day })}`,
+  };
+}

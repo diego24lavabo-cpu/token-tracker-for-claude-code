@@ -1,8 +1,15 @@
 import { MachineSelector } from './MachineSelector';
 import { PeriodSelector } from './PeriodSelector';
 
+interface HeaderProps {
+  title: string;
+  subtitle: string;
+  /** Set on a page that ignores the period: the period selector is off and says why. */
+  periodIgnored?: string;
+}
+
 /** The header shared by every page: title and subtitle on the left, selectors on the right. */
-export function Header({ title, subtitle }: { title: string; subtitle: string }) {
+export function Header({ title, subtitle, periodIgnored }: HeaderProps) {
   return (
     <div className="page-header">
       <div>
@@ -11,7 +18,7 @@ export function Header({ title, subtitle }: { title: string; subtitle: string })
       </div>
       <div className="page-controls">
         <MachineSelector />
-        <PeriodSelector />
+        <PeriodSelector disabledReason={periodIgnored} />
       </div>
     </div>
   );

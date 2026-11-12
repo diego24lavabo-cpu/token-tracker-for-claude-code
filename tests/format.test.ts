@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatCost,
   formatDay,
+  formatMonth,
   formatDuration,
   formatInt,
   formatPercent,
@@ -127,12 +128,23 @@ describe('formatDay', () => {
     expect(formatDay('2026-11-10')).toBe('Nov 10');
     expect(formatDay('2026-01-01')).toBe('Jan 1');
     expect(formatDay('2026-11-09', { year: true })).toBe('Nov 9, 2026');
+    expect(formatDay('2026-11-08', { weekday: true })).toBe('Sun, Nov 8');
+    expect(formatDay('2026-11-09', { weekday: true, year: true })).toBe('Mon, Nov 9, 2026');
   });
 
   it('shows a dash for anything that is not a day', () => {
     expect(formatDay('')).toBe('—');
     expect(formatDay('2026-13-01')).toBe('—');
     expect(formatDay('2026-11-10T12:00:00Z')).toBe('—');
+  });
+});
+
+describe('formatMonth', () => {
+  it('writes a month as its short name', () => {
+    expect(formatMonth('2026-11')).toBe('Nov');
+    expect(formatMonth('2025-12', { year: true })).toBe('Dec 2025');
+    expect(formatMonth('2026-13')).toBe('—');
+    expect(formatMonth('2026-11-10')).toBe('—');
   });
 });
 

@@ -362,6 +362,18 @@ button {
   background: var(--accent);
 }
 
+/* Off on a page the choice does not apply to: the selection stays visible, without color. */
+.segmented.is-disabled .segmented-option {
+  color: var(--text-muted);
+  cursor: default;
+  opacity: 0.55;
+}
+
+.segmented.is-disabled .segmented-option[aria-pressed='true'] {
+  background: var(--border);
+  color: var(--text);
+}
+
 .segmented--small {
   padding: 2px;
   border-radius: var(--radius-control);
@@ -1264,6 +1276,181 @@ button {
 @media (min-width: 1180px) {
   .models-charts {
     grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr);
+  }
+}
+
+/* ── Calendar page ─────────────────────────────────────────── */
+
+.chart-card-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.chart-tooltip-hint {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.swatch--highlight {
+  background: var(--accent-light);
+}
+
+.heat-0 {
+  background: var(--heat-0);
+}
+
+.heat-1 {
+  background: var(--heat-1);
+}
+
+.heat-2 {
+  background: var(--heat-2);
+}
+
+.heat-3 {
+  background: var(--heat-3);
+}
+
+.heat-4 {
+  background: var(--heat-4);
+}
+
+.heatmap {
+  --heat-gap: 3px;
+
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 8px;
+  /* Cells stop growing at about 30 px, past a maximized 1920 px window. */
+  max-width: calc(53 * 33px + 40px);
+}
+
+.heatmap-months {
+  display: grid;
+  grid-column: 2;
+  grid-template-columns: repeat(53, minmax(0, 1fr));
+  gap: var(--heat-gap);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.heatmap-month {
+  grid-row: 1;
+  white-space: nowrap;
+}
+
+.heatmap-weekdays {
+  display: grid;
+  grid-column: 1;
+  grid-row: 2;
+  grid-template-rows: repeat(7, minmax(0, 1fr));
+  gap: var(--heat-gap);
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.heatmap-grid {
+  display: grid;
+  grid-column: 2;
+  grid-row: 2;
+  grid-template-columns: repeat(53, minmax(0, 1fr));
+  grid-template-rows: repeat(7, auto);
+  gap: var(--heat-gap);
+}
+
+.heatmap-cell {
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.heatmap-cell[aria-disabled='true'] {
+  cursor: default;
+}
+
+.heatmap-cell:hover {
+  outline: 1px solid var(--text-muted);
+  outline-offset: 1px;
+}
+
+.heatmap-cell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.heatmap-cell.is-today {
+  box-shadow: inset 0 0 0 1px var(--text);
+}
+
+.heatmap-legend {
+  display: flex;
+  grid-column: 2;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.heatmap-legend > span:first-child {
+  margin-right: 4px;
+}
+
+.heatmap-legend > span:last-child {
+  margin-left: 4px;
+}
+
+.heatmap-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+}
+
+.heatmap-tooltip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.heatmap-placeholder {
+  height: 180px;
+}
+
+.calendar-charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.calendar-chart .chart-card-body {
+  flex: none;
+  height: 220px;
+}
+
+/* Two charts on the first line, the months on their own below. */
+.calendar-months {
+  grid-column: 1 / -1;
+}
+
+/* Three charts side by side once there is room for them. */
+@media (min-width: 1280px) {
+  .calendar-charts {
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.25fr) minmax(0, 1.1fr);
+  }
+
+  .calendar-months {
+    grid-column: auto;
   }
 }
 

@@ -16,6 +16,7 @@ const api: Api = {
   getProjectDetail: (project, filters) =>
     ipcRenderer.invoke(IPC.getProjectDetail, project, filters),
   getModels: (filters) => ipcRenderer.invoke(IPC.getModels, filters),
+  getCalendar: (machineIds) => ipcRenderer.invoke(IPC.getCalendar, machineIds),
   onUsageUpdated: (callback) => {
     const listener = () => callback();
     ipcRenderer.on(IPC.usageUpdated, listener);
