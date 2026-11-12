@@ -16,9 +16,9 @@ Status of the build plan in [SPEC.md](SPEC.md) §8. Read this first when resumin
 | 8. Agents page                 | `d002f1d`             | `getAgents`, KPIs, daily main vs subagents, by type, startup, kinds, top 10   |
 | 9. Settings, CSV, watching     | `7f1b298`             | Settings page, container switches, price editor, chokidar, CSV, rebuild       |
 | 9b. Container folder groups    | `2f5e874`             | `<folder> › <subfolder>` names, expandable folder rows on Projects            |
-| 10. Drive sync + Machines page | (this commit)         | Sync files, Drive detection, merge, Machines page, aliases, retention choice  |
+| 10. Drive sync + Machines page | `9e1c45c`             | Sync files, Drive detection, merge, Machines page, aliases, retention choice  |
 
-CI (lint, typecheck, tests on macOS and Windows) is green up to `e018d16`.
+CI (lint, typecheck, tests on macOS and Windows) is green up to `9e1c45c`.
 
 ## Decisions and deviations from the spec
 
