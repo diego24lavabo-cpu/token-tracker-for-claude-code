@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { IPC } from '../shared/ipc';
 import { localDay } from '../shared/period';
 import type {
+  Agents,
   AppInfo,
   Calendar,
   Machine,
@@ -19,12 +20,14 @@ import type {
   Sessions,
 } from '../shared/types';
 import {
+  emptyAgents,
   emptyCalendar,
   emptyModels,
   emptyOverview,
   emptyProjectDetail,
   emptyProjects,
   emptySessions,
+  getAgents,
   getCalendar,
   getModels,
   getOverview,
@@ -256,6 +259,11 @@ function registerIpc(): void {
   handle<SessionDetail | null>(IPC.getSessionDetail, (_event, machineInput, sessionInput) => {
     const { machineId, sessionId } = parseSessionKey(machineInput, sessionInput);
     return database ? getSessionDetail(database, pricing, machineId, sessionId) : null;
+  });
+
+  handle<Agents>(IPC.getAgents, (_event, input) => {
+    const filters = parseFilters(input);
+    return database ? getAgents(database, pricing, filters) : emptyAgents(filters);
   });
 }
 

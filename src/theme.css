@@ -1829,6 +1829,162 @@ button {
   }
 }
 
+/* ── Agents page ───────────────────────────────────────────── */
+
+.kpi-grid--6 {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+/* Two cards side by side at every width, down to the 1100 px minimum window. */
+.agents-row {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr);
+  align-items: stretch;
+  gap: var(--space-4);
+}
+
+.agents-row--even {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.agents-daily .chart-card-body {
+  flex: none;
+  height: 240px;
+}
+
+.chart-card-header--stacked {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.info-hint {
+  display: inline-grid;
+  color: var(--text-muted);
+  cursor: help;
+  place-items: center;
+}
+
+.info-hint:hover {
+  color: var(--accent-light);
+}
+
+.kinds-bar {
+  flex: none;
+}
+
+.kinds-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kinds-item {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px var(--space-2);
+  font-size: 13px;
+}
+
+.kinds-item.is-empty {
+  opacity: 0.6;
+}
+
+.kinds-name {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kinds-count {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.kinds-share {
+  text-align: right;
+}
+
+.kinds-description {
+  grid-column: 2 / -1;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.kind-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.kind-badge--workflow {
+  border-color: var(--accent-light);
+}
+
+.kind-badge--aside {
+  border-color: var(--text-muted);
+}
+
+.kind-badge--warmup {
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.cell-type {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.agents-types {
+  transition: opacity 120ms ease;
+}
+
+.agents-types.is-loading {
+  opacity: 0.75;
+}
+
+.agents-startup .hbar {
+  grid-template-columns: minmax(120px, 34%) minmax(40px, 1fr) 56px;
+}
+
+.agents-models {
+  gap: var(--space-5);
+}
+
+.model-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.model-bar .split-bar {
+  height: 10px;
+}
+
+.model-bar-shares {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+@media (min-width: 1280px) {
+  .agents-row:not(.agents-row--even) {
+    grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
+  }
+}
+
 /* ── Window widths ─────────────────────────────────────────── */
 
 /* Large monitor: the six shortcuts fit on one line, the project panel sits next to the table. */
@@ -1859,6 +2015,10 @@ button {
 
   .kpi-grid--5 > :nth-child(n + 4) {
     grid-column: span 3;
+  }
+
+  .kpi-grid--6 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 

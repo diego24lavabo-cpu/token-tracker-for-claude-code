@@ -13,6 +13,8 @@ import {
 } from '../shared/period';
 import type {
   AgentKind,
+  Agents,
+  AgentTypeRow,
   Calendar,
   CalendarKpis,
   DailyPoint,
@@ -28,7 +30,6 @@ import type {
   OverviewShortcuts,
   PeriodChange,
   Pricing,
-  ProjectAgentType,
   ProjectDetail,
   ProjectRow,
   Projects,
@@ -39,7 +40,9 @@ import type {
   SessionSort,
   SessionSortKey,
   SessionSubagent,
+  ShareItem,
   Streak,
+  SubagentKind,
   TokenBreakdown,
 } from '../shared/types';
 import type { UsageDatabase } from './db';
@@ -569,8 +572,6 @@ export function emptyProjects(): Projects {
     rows: [],
   };
 }
-
-type SubagentKind = ProjectAgentType['kind'];
 
 /** The analysis panel of one project over the period. */
 export function getProjectDetail(
@@ -1500,5 +1501,326 @@ export function getSessionDetail(
     projects: projectRows.map((row) => ({ ...row, share: ratio(row.tokens, total) })),
     subagents,
     timeline: { from, to },
+  };
+}
+
+// ── Agents ────────────────────────────────────────────────────────────────────
+
+/** Kinds of subagent runs, in the order the Kinds breakdown lists them. */
+const SUBAGENT_KINDS: readonly SubagentKind[] = ['task', 'workflow', 'aside', 'warmup'];
+/** Rows of the "Biggest invocations" table. */
+export const TOP_INVOCATIONS = 10;
+
+/**
+ * Condition on `subagents s`: a run counts on its start day, like a session, and in the
+ * project it spent the most tokens in.
+ */
+function subagentsWhere(filters: Filters): Where {
+  const where: Where = { sql: 's.start_day BETWEEN ? AND ?', params: [filters.from, filters.to] };
+  inList('s.machine_id', filters.machineIds, where);
+  inList('s.project', filters.projects, where);
+  return where;
+}
+
+interface AgentRunRow {
+  machine_id: string;
+  machine: string;
+  session_id: string;
+  agent_id: string;
+  project: string;
+  agent_type: string;
+  kind: SubagentKind;
+  model: string;
+  start_ts: number;
+  start_day: string;
+  active_ms: number;
+  calls: number;
+  startup_input: number;
+  output: number;
+  tokens: number;
+}
+
+const typeKeyOf = (type: string, kind: SubagentKind) => `${kind}\n${type}`;
+
+const SUBAGENT_MODEL_TOTALS = (p: string) => `SUM(${p}.input) AS input, SUM(${p}.output) AS output,
+  SUM(${p}.cache_write) AS cache_write, SUM(${p}.cache_read) AS cache_read,
+  SUM(${p}.cache_write_1h) AS cache_write_1h`;
+
+/**
+ * Tokens per agent type, kind and model, to price each type and find its main model.
+ * This machine's runs are split model by model from their responses; a run of another
+ * machine only has its main model, which then gets all its tokens.
+ */
+function agentTypeModels(db: UsageDatabase, where: Where): Map<string, Map<string, ModelTotals>> {
+  const local = db.raw
+    .prepare(
+      `SELECT s.agent_type, s.kind, m.model, ${SUBAGENT_MODEL_TOTALS('m')}
+       FROM subagents s
+       JOIN messages m ON m.session_id = s.session_id AND m.agent_id = s.agent_id
+       WHERE ${where.sql} AND s.machine_id = ?
+       GROUP BY s.agent_type, s.kind, m.model`,
+    )
+    .all(...where.params, db.machineId);
+  const others = db.raw
+    .prepare(
+      `SELECT s.agent_type, s.kind, s.model, ${SUBAGENT_MODEL_TOTALS('s')}
+       FROM subagents s WHERE ${where.sql} AND s.machine_id <> ?
+       GROUP BY s.agent_type, s.kind, s.model`,
+    )
+    .all(...where.params, db.machineId);
+
+  const byType = new Map<string, Map<string, ModelTotals>>();
+  for (const row of [...local, ...others] as (ModelTotals & {
+    agent_type: string;
+    kind: SubagentKind;
+  })[]) {
+    const key = typeKeyOf(row.agent_type, row.kind);
+    const models = byType.get(key) ?? new Map<string, ModelTotals>();
+    const sum = models.get(row.model);
+    models.set(
+      row.model,
+      sum
+        ? {
+            model: row.model,
+            input: sum.input + row.input,
+            output: sum.output + row.output,
+            cache_write: sum.cache_write + row.cache_write,
+            cache_read: sum.cache_read + row.cache_read,
+            cache_write_1h: sum.cache_write_1h + row.cache_write_1h,
+          }
+        : { ...row },
+    );
+    byType.set(key, models);
+  }
+  return byType;
+}
+
+/** Items with tokens, largest first, with each one's share of their total. */
+function shareItems(rows: readonly { name: string; tokens: number }[]): ShareItem[] {
+  const items = rows.filter((row) => row.tokens > 0).sort(byTokens);
+  const total = items.reduce((sum, row) => sum + row.tokens, 0);
+  return items.map((row) => ({
+    name: row.name,
+    tokens: row.tokens,
+    share: ratio(row.tokens, total),
+  }));
+}
+
+/**
+ * The Agents page. Tokens per day, the subagent share and the models come from `hourly`,
+ * like the Overview; everything per run (types, kinds, averages, top 10) from
+ * `subagents`, where a run counts on its start day.
+ */
+export function getAgents(db: UsageDatabase, pricing: Pricing, filters: Filters): Agents {
+  const raw = db.raw;
+  const where = hourlyWhere(filters);
+
+  const dailyRows = raw
+    .prepare(
+      `SELECT local_day AS day,
+              SUM(CASE WHEN kind = 'main' THEN ${TOKENS} ELSE 0 END) AS main,
+              SUM(CASE WHEN kind <> 'main' THEN ${TOKENS} ELSE 0 END) AS subagent
+       FROM hourly WHERE ${where.sql} GROUP BY local_day`,
+    )
+    .all(...where.params) as MainSubagentPoint[];
+  const byDay = new Map(dailyRows.map((row) => [row.day, row]));
+  const daily = eachDay(filters.from, filters.to).map(
+    (day) => byDay.get(day) ?? { day, main: 0, subagent: 0 },
+  );
+  const mainTokens = dailyRows.reduce((sum, row) => sum + row.main, 0);
+  const subagentTokens = dailyRows.reduce((sum, row) => sum + row.subagent, 0);
+
+  const modelRows = raw
+    .prepare(
+      `SELECT model AS name, kind = 'main' AS is_main, SUM(${TOKENS}) AS tokens
+       FROM hourly WHERE ${where.sql} GROUP BY model, kind = 'main'`,
+    )
+    .all(...where.params) as { name: string; is_main: number; tokens: number }[];
+  const modelTotals = new Map<string, number>();
+  for (const row of modelRows) {
+    modelTotals.set(row.name, (modelTotals.get(row.name) ?? 0) + row.tokens);
+  }
+
+  const runWhere = subagentsWhere(filters);
+  const runs = raw
+    .prepare(
+      `SELECT s.machine_id, COALESCE(m.name, s.machine_id) AS machine, s.session_id, s.agent_id,
+              s.project, s.agent_type, s.kind, s.model, s.start_ts, s.start_day, s.active_ms,
+              s.calls, s.startup_input, s.output,
+              s.input + s.output + s.cache_write + s.cache_read AS tokens
+       FROM subagents s LEFT JOIN machines m ON m.id = s.machine_id
+       WHERE ${runWhere.sql}`,
+    )
+    .all(...runWhere.params) as AgentRunRow[];
+
+  // KPIs: invocations leave warm-ups out; the averages keep only tasks and workflows.
+  const invocations = runs.filter((run) => run.kind !== 'warmup');
+  const agentRuns = invocations.filter((run) => run.kind === 'task' || run.kind === 'workflow');
+  const runTokens = agentRuns.map((run) => run.tokens).sort((a, b) => a - b);
+
+  const started = startDayWhere(filters);
+  const sessions = raw
+    .prepare(
+      `SELECT COUNT(*) AS count, COALESCE(SUM(subagent_count > 0), 0) AS with_subagents
+       FROM sessions WHERE ${started.sql}`,
+    )
+    .get(...started.params) as { count: number; with_subagents: number };
+
+  // By agent type and kind.
+  const typeModels = agentTypeModels(db, runWhere);
+  const groups = new Map<string, AgentRunRow[]>();
+  for (const run of runs) {
+    const key = typeKeyOf(run.agent_type, run.kind);
+    const list = groups.get(key) ?? [];
+    list.push(run);
+    groups.set(key, list);
+  }
+  const allRunTokens = runs.reduce((sum, run) => sum + run.tokens, 0);
+  const sumOf = (list: readonly AgentRunRow[], pick: (run: AgentRunRow) => number) =>
+    list.reduce((sum, run) => sum + pick(run), 0);
+  const byType: AgentTypeRow[] = [...groups.values()].map((list) => {
+    const { agent_type: type, kind } = list[0]!;
+    const tokens = sumOf(list, (run) => run.tokens);
+    const models = [...(typeModels.get(typeKeyOf(type, kind))?.values() ?? [])];
+    const main = largest(
+      models.map((row) => ({
+        name: row.model,
+        tokens: row.input + row.output + row.cache_write + row.cache_read,
+      })),
+    );
+    return {
+      type,
+      kind,
+      runs: list.length,
+      tokens,
+      share: ratio(tokens, allRunTokens),
+      averageTokens: tokens / list.length,
+      averageStartup: sumOf(list, (run) => run.startup_input) / list.length,
+      averageActiveMs: sumOf(list, (run) => run.active_ms) / list.length,
+      averageCalls: sumOf(list, (run) => run.calls) / list.length,
+      outputShare: ratio(
+        sumOf(list, (run) => run.output),
+        tokens,
+      ),
+      mainModel: main?.name ?? list[0]!.model,
+      cost: costOfModels(pricing, models).cost,
+    };
+  });
+  const byKindAndType = (
+    a: { kind: SubagentKind; type: string },
+    b: { kind: SubagentKind; type: string },
+  ) =>
+    SUBAGENT_KINDS.indexOf(a.kind) - SUBAGENT_KINDS.indexOf(b.kind) ||
+    collator.compare(a.type, b.type);
+  byType.sort((a, b) => b.tokens - a.tokens || byKindAndType(a, b));
+
+  const startupByType = byType
+    .filter((row) => row.kind !== 'warmup')
+    .map((row) => ({
+      type: row.type,
+      kind: row.kind,
+      runs: row.runs,
+      averageStartup: row.averageStartup,
+    }))
+    .sort((a, b) => b.averageStartup - a.averageStartup || byKindAndType(a, b));
+
+  const kinds = SUBAGENT_KINDS.map((kind) => {
+    const list = runs.filter((run) => run.kind === kind);
+    const tokens = sumOf(list, (run) => run.tokens);
+    return { kind, runs: list.length, tokens, share: ratio(tokens, allRunTokens) };
+  });
+
+  const top = [...invocations]
+    .sort((a, b) => b.tokens - a.tokens || b.start_ts - a.start_ts)
+    .slice(0, TOP_INVOCATIONS)
+    .map((run) => ({
+      machineId: run.machine_id,
+      machine: run.machine,
+      sessionId: run.session_id,
+      agentId: run.agent_id,
+      project: run.project,
+      type: run.agent_type,
+      kind: run.kind,
+      model: run.model,
+      start: run.start_ts,
+      startDay: run.start_day,
+      startTime: db.localDayTime(run.start_ts).time,
+      activeMs: run.active_ms,
+      calls: run.calls,
+      startupInput: run.startup_input,
+      tokens: run.tokens,
+    }));
+
+  const anyRun: Where = { sql: '1', params: [] };
+  inList('machine_id', filters.machineIds, anyRun);
+  const hasSubagents =
+    raw
+      .prepare(`SELECT 1 FROM subagents WHERE ${anyRun.sql} LIMIT 1`)
+      .pluck()
+      .get(...anyRun.params) !== undefined;
+
+  const modelsOf = (main: boolean) =>
+    shareItems(
+      modelRows
+        .filter((row) => (row.is_main === 1) === main)
+        .map(({ name, tokens }) => ({ name, tokens })),
+    );
+
+  return {
+    hasData: hasAnyUsage(db, filters.machineIds),
+    hasSubagents,
+    kpis: {
+      subagentTokens,
+      subagentShare: ratio(subagentTokens, mainTokens + subagentTokens),
+      invocations: invocations.length,
+      sessions: sessions.count,
+      invocationsPerSession: sessions.count > 0 ? invocations.length / sessions.count : null,
+      averageTokens: average(runTokens),
+      medianTokens: median(runTokens),
+      averageStartup: average(agentRuns.map((run) => run.startup_input)),
+      averageActiveMs: average(agentRuns.map((run) => run.active_ms)),
+      sessionsWithSubagents: sessions.with_subagents,
+      sessionsWithSubagentsShare:
+        sessions.count > 0 ? sessions.with_subagents / sessions.count : null,
+    },
+    daily,
+    byType,
+    startupByType,
+    top,
+    kinds,
+    modelsMainVsSub: {
+      models: shareItems([...modelTotals].map(([name, tokens]) => ({ name, tokens }))).map(
+        (item) => item.name,
+      ),
+      main: modelsOf(true),
+      subagents: modelsOf(false),
+    },
+  };
+}
+
+/** What the Agents page shows when there is no database to read. */
+export function emptyAgents(filters: Filters): Agents {
+  return {
+    hasData: false,
+    hasSubagents: false,
+    kpis: {
+      subagentTokens: 0,
+      subagentShare: 0,
+      invocations: 0,
+      sessions: 0,
+      invocationsPerSession: null,
+      averageTokens: null,
+      medianTokens: null,
+      averageStartup: null,
+      averageActiveMs: null,
+      sessionsWithSubagents: 0,
+      sessionsWithSubagentsShare: null,
+    },
+    daily: eachDay(filters.from, filters.to).map((day) => ({ day, main: 0, subagent: 0 })),
+    byType: [],
+    startupByType: [],
+    top: [],
+    kinds: SUBAGENT_KINDS.map((kind) => ({ kind, runs: 0, tokens: 0, share: 0 })),
+    modelsMainVsSub: { models: [], main: [], subagents: [] },
   };
 }

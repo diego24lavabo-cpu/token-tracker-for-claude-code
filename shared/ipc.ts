@@ -9,5 +9,6 @@ export const IPC = {
   getCalendar: 'usage:calendar',
   getSessions: 'usage:sessions',
   getSessionDetail: 'usage:session-detail',
+  getAgents: 'usage:agents',
   usageUpdated: 'usage:updated',
 } as const;

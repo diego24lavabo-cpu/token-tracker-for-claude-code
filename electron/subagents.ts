@@ -16,16 +16,14 @@
  * with `isSidechain: true`. Both layouts are supported.
  */
 import fs from 'node:fs';
-import { ASIDE_AGENT_TYPE, UNKNOWN_AGENT_TYPE } from '../shared/agents';
+import { ASIDE_AGENT_TYPE, INLINE_AGENT_ID, UNKNOWN_AGENT_TYPE } from '../shared/agents';
 import type { AgentKind } from '../shared/types';
 import type { UsageRecord } from './parser';
 
 /** What the location of a transcript says about it. Warm-ups are only known from content. */
 export type BaseKind = Exclude<AgentKind, 'warmup'>;
 
-export { ASIDE_AGENT_TYPE, UNKNOWN_AGENT_TYPE } from '../shared/agents';
-/** Legacy sidechain lines without an `agentId` are grouped per session under this id. */
-export const INLINE_AGENT_ID = 'inline';
+export { ASIDE_AGENT_TYPE, INLINE_AGENT_ID, UNKNOWN_AGENT_TYPE } from '../shared/agents';
 
 const ASIDE_FILE_PREFIX = 'agent-aside_question';
 const META_MAX_BYTES = 1024 * 1024;

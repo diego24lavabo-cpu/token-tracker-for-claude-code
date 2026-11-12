@@ -510,6 +510,121 @@ export interface SessionDetail {
   timeline: { from: number; to: number };
 }
 
+// ── Agents ────────────────────────────────────────────────────────────────────
+
+export type SubagentKind = Exclude<AgentKind, 'main'>;
+
+export interface AgentsKpis {
+  /** Tokens of all subagent transcripts, warm-ups included (they are real API calls). */
+  subagentTokens: number;
+  /** `subagentTokens` / all tokens: the number of the Overview's Subagents card. */
+  subagentShare: number;
+  /** Invocations that started in the period: every kind but warm-ups, `/btw` included. */
+  invocations: number;
+  /** Sessions that started in the period, as on the Sessions page. */
+  sessions: number;
+  invocationsPerSession: number | null;
+  /**
+   * Per invocation, over the task and workflow runs only: `/btw` side questions re-log
+   * the conversation and warm-ups never ran, so both would skew the averages. Null
+   * without such runs, as are the other averages.
+   */
+  averageTokens: number | null;
+  medianTokens: number | null;
+  /** Total input of the first call. */
+  averageStartup: number | null;
+  /** Active time, as everywhere else. */
+  averageActiveMs: number | null;
+  /** Sessions with at least one invocation, out of `sessions`. */
+  sessionsWithSubagents: number;
+  sessionsWithSubagentsShare: number | null;
+}
+
+/** One agent type and kind, as a row of the "By agent type" table. */
+export interface AgentTypeRow {
+  type: string;
+  kind: SubagentKind;
+  /** Transcripts that started in the period. Invocations, except for warm-ups. */
+  runs: number;
+  /** All token types. */
+  tokens: number;
+  /** Part of all the subagent tokens of the table. */
+  share: number;
+  averageTokens: number;
+  averageStartup: number;
+  averageActiveMs: number;
+  averageCalls: number;
+  /** Output / all tokens. */
+  outputShare: number;
+  /** The model with the most tokens in these runs. */
+  mainModel: string;
+  /** Null when none of its models has a price. */
+  cost: number | null;
+}
+
+export interface AgentStartup {
+  type: string;
+  kind: SubagentKind;
+  runs: number;
+  averageStartup: number;
+}
+
+export interface AgentKindRow {
+  kind: SubagentKind;
+  /** Transcripts; invocations for every kind but warm-ups. */
+  runs: number;
+  tokens: number;
+  /** Part of all subagent tokens. */
+  share: number;
+}
+
+/** One subagent run, as a row of the "Biggest invocations" table. */
+export interface AgentInvocation {
+  machineId: string;
+  machine: string;
+  sessionId: string;
+  agentId: string;
+  project: string;
+  type: string;
+  kind: SubagentKind;
+  model: string;
+  /** UTC milliseconds of the first response, and its local day and time. */
+  start: number;
+  startDay: string;
+  startTime: string;
+  activeMs: number;
+  calls: number;
+  startupInput: number;
+  tokens: number;
+}
+
+export interface AgentModels {
+  /** Every model of either bar, largest first over both: the order of the colors. */
+  models: string[];
+  /** Largest first. `share` is the part of the main sessions' (or subagents') tokens. */
+  main: ShareItem[];
+  subagents: ShareItem[];
+}
+
+export interface Agents {
+  /** False when the database holds no usage at all, for the selected machines. */
+  hasData: boolean;
+  /** False when no subagent ever ran on the selected machines, whatever the period. */
+  hasSubagents: boolean;
+  kpis: AgentsKpis;
+  /** One point per day of the period, zeros included. */
+  daily: MainSubagentPoint[];
+  /** Largest first. Rows count on the run's start day. */
+  byType: AgentTypeRow[];
+  /** Largest first, warm-ups left out. */
+  startupByType: AgentStartup[];
+  /** The 10 runs with the most tokens, warm-ups left out. */
+  top: AgentInvocation[];
+  /** Always the four kinds, in the order task, workflow, aside, warm-up. */
+  kinds: AgentKindRow[];
+  modelsMainVsSub: AgentModels;
+}
+
 /** The API exposed to the renderer as `window.api` by the preload script. */
 export interface Api {
   /** Available synchronously so the title bar can lay out on first paint. */
@@ -526,6 +641,7 @@ export interface Api {
   getSessions(filters: SessionFilters, page: number, sort: SessionSort): Promise<Sessions>;
   /** Null when the session is not in the database. */
   getSessionDetail(machineId: string, sessionId: string): Promise<SessionDetail | null>;
+  getAgents(filters: Filters): Promise<Agents>;
   /** Subscribes to "usage data changed" events. Returns an unsubscribe function. */
   onUsageUpdated(callback: () => void): () => void;
 }

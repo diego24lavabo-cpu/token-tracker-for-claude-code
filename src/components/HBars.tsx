@@ -8,6 +8,10 @@ export interface HBarItem {
   tokens: number;
   /** 0 to 1: the bar length and the percentage shown. */
   share: number;
+  /** Shown instead of the percentage, for example a token count. */
+  value?: string;
+  /** The hover text, instead of label · tokens · percentage. */
+  title?: string;
 }
 
 interface HBarsProps {
@@ -24,7 +28,10 @@ export function HBars({ items, label }: HBarsProps) {
         <li
           key={item.key}
           className="hbar"
-          title={`${item.label} · ${formatTokens(item.tokens)} · ${formatPercent(item.share)}`}
+          title={
+            item.title ??
+            `${item.label} · ${formatTokens(item.tokens)} · ${formatPercent(item.share)}`
+          }
         >
           <span className="hbar-label">
             <span className="hbar-name">{item.label}</span>
@@ -36,7 +43,7 @@ export function HBars({ items, label }: HBarsProps) {
               style={{ width: `${Math.max(0, Math.min(1, item.share)) * 100}%` }}
             />
           </span>
-          <span className="hbar-value num">{formatPercent(item.share)}</span>
+          <span className="hbar-value num">{item.value ?? formatPercent(item.share)}</span>
         </li>
       ))}
     </ul>

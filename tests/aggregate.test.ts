@@ -3,12 +3,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   CALENDAR_DAYS,
   comparePeriods,
+  emptyAgents,
   emptyCalendar,
   emptyModels,
   emptyOverview,
   emptyProjectDetail,
   emptyProjects,
   emptySessions,
+  getAgents,
   getCalendar,
   getModels,
   getOverview,
@@ -1103,5 +1105,175 @@ describe('session request checks', () => {
     expect(parseSessionKey('m', 's')).toEqual({ machineId: 'm', sessionId: 's' });
     expect(() => parseSessionKey('', 's')).toThrow(InvalidRequestError);
     expect(() => parseSessionKey('m', 42)).toThrow(InvalidRequestError);
+  });
+});
+
+describe('getAgents', () => {
+  const S1 = '11111111-1111-4111-8111-111111111111';
+  const SUBAGENT_TOKENS = 44894 + 1425;
+
+  it('matches the Overview shortcut: subagent share and invocations', async () => {
+    const db = await fixtureDb();
+    const agents = getAgents(db, PRICING, BOTH_DAYS);
+    const overview = getOverview(db, PRICING, BOTH_DAYS, EVENING);
+
+    expect(agents.hasData).toBe(true);
+    expect(agents.hasSubagents).toBe(true);
+    expect(agents.kpis.subagentShare).toBe(overview.shortcuts.subagents.share);
+    expect(agents.kpis.invocations).toBe(overview.shortcuts.subagents.invocations);
+    expect(agents.kpis.subagentTokens).toBe(SUBAGENT_TOKENS);
+    // Main + subagents per day = the Overview's days.
+    expect(agents.daily.map((point) => point.main + point.subagent)).toEqual(
+      overview.daily.map((point) => point.input + point.output),
+    );
+    expect(agents.daily.reduce((sum, point) => sum + point.subagent, 0)).toBe(SUBAGENT_TOKENS);
+  });
+
+  it('computes the KPIs over tasks and workflows, warm-ups and /btw apart', async () => {
+    const db = await fixtureDb();
+    const { kpis } = getAgents(db, PRICING, BOTH_DAYS);
+
+    // Explore, the agent without meta, build-check, the legacy agent and the inline bucket.
+    const runs = [21540, 3035, 4270, 1225, 200];
+    expect(kpis).toMatchObject({
+      invocations: 6,
+      sessions: 3,
+      invocationsPerSession: 6 / 3,
+      averageTokens: runs.reduce((sum, value) => sum + value, 0) / runs.length,
+      medianTokens: 3035,
+      sessionsWithSubagents: 2,
+      sessionsWithSubagentsShare: 2 / 3,
+    });
+    expect(kpis.averageStartup).toBeGreaterThan(0);
+    expect(kpis.averageActiveMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('breaks the runs down by agent type and kind, warm-ups counted apart', async () => {
+    const db = await fixtureDb();
+    const { byType, kinds, startupByType } = getAgents(db, PRICING, BOTH_DAYS);
+
+    expect(byType.map((row) => [row.type, row.kind, row.runs, row.tokens])).toEqual([
+      ['Explore', 'task', 1, 21540],
+      ['aside_question', 'aside', 1, 12040],
+      // The agent without meta, the legacy agent and the inline bucket.
+      ['unknown', 'task', 3, 3035 + 1225 + 200],
+      ['build-check', 'workflow', 1, 4270],
+      ['general-purpose', 'warmup', 1, 4009],
+    ]);
+    expect(byType.reduce((sum, row) => sum + row.tokens, 0)).toBe(SUBAGENT_TOKENS);
+    expect(byType.reduce((sum, row) => sum + row.share, 0)).toBeCloseTo(1, 10);
+
+    const explore = byType[0]!;
+    expect(explore).toMatchObject({
+      averageTokens: 21540,
+      averageCalls: 3,
+      outputShare: 100 / 21540,
+      mainModel: 'Haiku 5.5',
+    });
+    const unknown = byType.find((row) => row.type === 'unknown')!;
+    expect(unknown.averageTokens).toBeCloseTo(4460 / 3, 10);
+    expect(unknown.mainModel).toBe('Sonnet 5.5');
+
+    // Priced model by model, the types add up to the Overview cost of the subagent kinds.
+    const subagentCost = getOverview(
+      db,
+      PRICING,
+      { ...BOTH_DAYS, kinds: ['task', 'workflow', 'aside', 'warmup'] },
+      EVENING,
+    ).kpis.cost!;
+    expect(byType.reduce((sum, row) => sum + row.cost!, 0)).toBeCloseTo(subagentCost, 12);
+
+    expect(kinds).toEqual([
+      { kind: 'task', runs: 4, tokens: 21540 + 4460, share: 26000 / SUBAGENT_TOKENS },
+      { kind: 'workflow', runs: 1, tokens: 4270, share: 4270 / SUBAGENT_TOKENS },
+      { kind: 'aside', runs: 1, tokens: 12040, share: 12040 / SUBAGENT_TOKENS },
+      { kind: 'warmup', runs: 1, tokens: 4009, share: 4009 / SUBAGENT_TOKENS },
+    ]);
+
+    // Largest startup first, warm-ups left out.
+    expect(startupByType.map((row) => row.kind)).not.toContain('warmup');
+    expect(startupByType).toHaveLength(4);
+    const startups = startupByType.map((row) => row.averageStartup);
+    expect(startups).toEqual([...startups].sort((a, b) => b - a));
+  });
+
+  it('lists the biggest invocations, warm-ups left out', async () => {
+    const db = await fixtureDb();
+    const { top } = getAgents(db, PRICING, BOTH_DAYS);
+
+    expect(top.map((run) => [run.type, run.kind, run.tokens])).toEqual([
+      ['Explore', 'task', 21540],
+      ['aside_question', 'aside', 12040],
+      ['build-check', 'workflow', 4270],
+      ['unknown', 'task', 3035],
+      ['unknown', 'task', 1225],
+      ['unknown', 'task', 200],
+    ]);
+    expect(top[0]).toMatchObject({
+      machineId: db.machineId,
+      machine: 'test-machine',
+      sessionId: S1,
+      project: 'demo-app',
+      model: 'Haiku 5.5',
+      calls: 3,
+      startDay: '2026-11-10',
+    });
+    expect(top.at(-1)!.agentId).toBe('inline');
+  });
+
+  it('splits the models between main sessions and subagents', async () => {
+    const db = await fixtureDb();
+    const { modelsMainVsSub } = getAgents(db, PRICING, BOTH_DAYS);
+    const overview = getOverview(db, PRICING, BOTH_DAYS, EVENING);
+
+    expect(modelsMainVsSub.subagents.map((row) => [row.name, row.tokens])).toEqual([
+      ['Haiku 5.5', 21540 + 4009],
+      ['Opus 5.5', 12040],
+      ['Sonnet 5.5', 3035 + 4270 + 1225 + 200],
+    ]);
+    const sum = (items: { tokens: number }[]) =>
+      items.reduce((total, row) => total + row.tokens, 0);
+    expect(sum(modelsMainVsSub.main) + sum(modelsMainVsSub.subagents)).toBe(
+      overview.kpis.totalTokens,
+    );
+    expect(modelsMainVsSub.main.reduce((total, row) => total + row.share, 0)).toBeCloseTo(1, 10);
+    expect(new Set(modelsMainVsSub.models)).toEqual(
+      new Set([...modelsMainVsSub.main, ...modelsMainVsSub.subagents].map((row) => row.name)),
+    );
+  });
+
+  it('follows the project and machine filters', async () => {
+    const db = await fixtureDb();
+    const other = getAgents(db, PRICING, { ...BOTH_DAYS, projects: ['other-tool'] });
+    expect(other.kpis.invocations).toBe(0);
+    expect(other.byType).toEqual([]);
+    expect(other.hasSubagents).toBe(true);
+
+    const elsewhere = getAgents(db, PRICING, { ...BOTH_DAYS, machineIds: ['another-machine'] });
+    expect(elsewhere.hasData).toBe(false);
+    expect(elsewhere.hasSubagents).toBe(false);
+  });
+
+  it('reports a database without subagents', async () => {
+    const db = openMemoryDb();
+    open.push(db);
+    const root = path.join(tempDir(), 'projects');
+    writeLines(path.join(root, MAC_FOLDER, `${SESSION_A}.jsonl`), [
+      assistantLine({ id: 'main1', ts: '2026-11-10T10:00:00.000Z' }),
+    ]);
+    await scanLogs(db, [root]);
+
+    const agents = getAgents(db, PRICING, BOTH_DAYS);
+    expect(agents.hasData).toBe(true);
+    expect(agents.hasSubagents).toBe(false);
+    expect(agents.kpis.invocations).toBe(0);
+    expect(agents.kpis.averageTokens).toBeNull();
+    expect(agents.kinds.map((row) => row.runs)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('describes an empty database', () => {
+    const db = openMemoryDb();
+    open.push(db);
+    expect(getAgents(db, PRICING, BOTH_DAYS)).toEqual(emptyAgents(BOTH_DAYS));
   });
 });

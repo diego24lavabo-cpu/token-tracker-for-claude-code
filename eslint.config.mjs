@@ -16,7 +16,7 @@ export default defineConfig(
     languageOptions: { globals: globals.browser },
   },
   {
-    files: ['electron/**/*.ts', 'tests/**/*.ts', '*.{mts,mjs}'],
+    files: ['electron/**/*.ts', 'tests/**/*.ts', 'scripts/**/*.mjs', '*.{mts,mjs}'],
     languageOptions: { globals: globals.node },
   },
   prettier,

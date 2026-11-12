@@ -20,6 +20,7 @@ const api: Api = {
   getSessions: (filters, page, sort) => ipcRenderer.invoke(IPC.getSessions, filters, page, sort),
   getSessionDetail: (machineId, sessionId) =>
     ipcRenderer.invoke(IPC.getSessionDetail, machineId, sessionId),
+  getAgents: (filters) => ipcRenderer.invoke(IPC.getAgents, filters),
   onUsageUpdated: (callback) => {
     const listener = () => callback();
     ipcRenderer.on(IPC.usageUpdated, listener);
