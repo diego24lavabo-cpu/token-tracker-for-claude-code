@@ -125,6 +125,10 @@ export const en = {
       title: 'No usage found yet',
       body: (folder: string) =>
         `Claude Code writes its session logs in ${folder}. Once you have used Claude Code on this computer, your usage shows up here by itself.`,
+      noFolder: (folder: string) =>
+        `No Claude Code log folder was found. Claude Code writes its session logs in ${folder}. If yours are somewhere else, choose that folder.`,
+      pickFolder: 'Choose a folder…',
+      settings: 'Open Settings',
     },
   },
 
@@ -548,10 +552,149 @@ export const en = {
     today: 'Today',
     yesterday: 'Yesterday',
     daysAgo: (days: number) => `${days} days ago`,
+    justNow: 'just now',
+    minutesAgo: (minutes: number) => `${minutes} min ago`,
+    hoursAgo: (hours: number) => `${hours} h ago`,
   },
 
   table: {
     sortBy: (column: string) => `Sort by ${column}`,
+  },
+
+  settings: {
+    unavailable:
+      'Settings cannot be changed in demo mode or when the usage database could not be opened.',
+    sources: {
+      title: 'Data sources',
+      folders: 'Claude Code folders',
+      added: 'Added',
+      notFound: 'Not found',
+      files: (count: number, formatted: string) => (count === 1 ? '1 file' : `${formatted} files`),
+      remove: (folder: string) => `Stop reading ${folder}`,
+      addFolder: 'Add folder…',
+      folderAdded: (folder: string) => `Added ${folder}`,
+      folderExists: (folder: string) => `${folder} is already read`,
+      filesScanned: 'Files scanned',
+      subagentFiles: 'Subagent files found',
+      skippedLines: 'Lines skipped',
+      skippedBadge: (formatted: string) => `${formatted} skipped`,
+      skippedHint:
+        'Lines that could not be read (broken JSON or a malformed record). Lines without usage are not counted.',
+      databaseSize: 'Database size',
+      lastScan: 'Last scan',
+      never: 'Not yet',
+      scanNow: 'Scan now',
+      scanning: 'Scanning…',
+      scanTook: (duration: string) => `in ${duration}`,
+      retention: 'Claude Code keeps transcripts',
+      retentionDays: (days: number) => (days === 1 ? '1 day' : `${days} days`),
+      retentionDefault: 'default',
+      retentionUnreadable: 'Settings file not readable',
+      retentionHint: (file: string) =>
+        `Claude Code deletes old session transcripts (cleanupPeriodDays in ${file}). This app keeps its own copy of everything it has read, so only what it never scanned can be lost.`,
+      keepLonger: 'Keep Claude Code history longer…',
+      keepLongerDone: 'Claude Code will keep its transcripts longer from its next start.',
+    },
+    containers: {
+      title: 'Container folders',
+      hint: 'A folder that holds several projects, such as the one your editor opens, can be split: its usage is then reported under the folder directly below it. Usage at the top of the folder keeps its name.',
+      empty: 'No folder has usage in its subfolders yet.',
+      toggle: (name: string) => `Split ${name} by subfolder`,
+      subfolders: (count: number) => (count === 1 ? '1 subfolder' : `${count} subfolders`),
+      inSubfolders: (share: string) => `${share} in subfolders`,
+      applying: 'Applying…',
+    },
+    sync: {
+      title: 'Sync',
+      status: 'Status',
+      off: 'Local only',
+      thisMachine: 'This machine',
+      knownMachines: 'Known machines',
+      hint: 'Sync between computers through Google Drive comes in a later version.',
+    },
+    app: {
+      title: 'Application',
+      launchAtLogin: 'Launch at login',
+      launchUnavailableDev: 'Available in the installed app',
+      launchUnavailablePlatform: 'Not available on this system',
+      fileWatching: 'Watch log files',
+      fileWatchingHint: 'Refresh a few seconds after Claude Code writes',
+      export: 'Export CSV',
+      exportHint: 'For the period and machines selected above',
+      exports: {
+        daily: 'Daily',
+        projects: 'Projects',
+        models: 'Models',
+        agentTypes: 'Agent types',
+      },
+      exported: (rows: number, file: string) =>
+        `${rows === 1 ? '1 row' : `${rows.toLocaleString('en-US')} rows`} saved to ${file}`,
+      exportFailed: 'The file could not be written.',
+      rebuildLabel: 'Rebuild database',
+      rebuild: 'Rebuild…',
+      rebuildHint: 'Read every transcript still on disk again',
+      rebuilding: 'Rebuilding…',
+      rebuilt: 'Database rebuilt.',
+      actionFailed: 'That did not work. Details are in the app log.',
+      dataFolder: 'Data folder',
+      version: 'Version',
+      about: 'About',
+      disclaimer:
+        'Not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic.',
+      local: 'Everything stays on this computer: the app makes no network requests.',
+    },
+    pricing: {
+      title: 'Pricing',
+      subtitle: 'US dollars per million tokens, for the cost estimate',
+      lastChecked: 'Last checked',
+      checkedToday: 'Today',
+      invalidDate: 'Write the date as YYYY-MM-DD, for example 2026-11-03.',
+      verify: 'Verify the current prices at anthropic.com/pricing.',
+      model: 'Model',
+      input: 'Input',
+      output: 'Output',
+      cacheWrite: 'Cache write 5 min',
+      cacheWrite1h: 'Cache write 1 h',
+      cacheRead: 'Cache read',
+      usage: 'Usage',
+      unused: 'Not used',
+      noPrice: 'No price',
+      showAll: (count: number) => `Show all models (${count})`,
+      showUsed: 'Show used models only',
+      reset: 'Reset to defaults',
+      save: 'Save prices',
+      saved: 'Prices saved.',
+      invalid:
+        'Fill in every price of a row with a number from 0 to 10,000, or leave a new model empty.',
+      priceLabel: (model: string, field: string) => `${field} price of ${model}`,
+    },
+  },
+
+  dialogs: {
+    pickFolder: {
+      title: 'Choose the Claude Code projects folder',
+      button: 'Read this folder',
+    },
+    exportCsv: {
+      title: 'Export CSV',
+      filter: 'CSV files',
+    },
+    rebuild: {
+      message: 'Rebuild the usage database?',
+      detail:
+        'Every transcript still on disk is read again and every table is recomputed. Usage whose transcript Claude Code already deleted is kept. This can take a minute with a long history.',
+      confirm: 'Rebuild',
+      cancel: 'Cancel',
+    },
+    keepLonger: {
+      message: (days: number) => `Keep Claude Code transcripts for ${days} days?`,
+      detail: (current: number, days: number, file: string) =>
+        `Claude Code currently deletes session transcripts after ${current} days. This sets "cleanupPeriodDays": ${days} in ${file}. Every other setting in that file is kept. Claude Code applies it the next time it starts. Transcripts use disk space in your Claude folder.`,
+      confirm: 'Change the setting',
+      cancel: 'Cancel',
+      unreadable: (file: string) =>
+        `${file} is not valid JSON, so the app does not change it. Add "cleanupPeriodDays": 365 to it by hand.`,
+    },
   },
 
   placeholder: {

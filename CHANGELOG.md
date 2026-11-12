@@ -21,4 +21,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Active time for sessions and subagent runs: pauses longer than 30 minutes are left out.
 - Container folders: a folder flagged as holding several projects is split by the directory directly under it.
 - The period comparison shows "New activity" when the period before had less than 5% of the usage.
+- Projects, Models, Calendar, Sessions and Agents pages.
+- Settings page: data sources with an "Add folder" picker, scan statistics and a "lines skipped" badge, the container folder switches, the price editor, launch at login, "Rebuild database" and About.
+- File watching: the dashboard refreshes a few seconds after Claude Code writes a transcript. It can be turned off in Settings.
+- CSV export of the daily, project, model and agent type tables for the selected period and machines.
+- "Keep Claude Code history longer": raises `cleanupPeriodDays` in Claude Code's settings file, only after a confirmation.
+- "No logs found" state with a folder picker.
 - Repository files: license, contribution guide, security policy, issue and pull request templates, CI workflow.

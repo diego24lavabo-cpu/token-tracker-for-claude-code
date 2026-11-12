@@ -59,7 +59,7 @@ export function candidateLogRoots(pathEnv: PathEnv = currentEnv()): string[] {
   });
 }
 
-function isDirectory(p: string): boolean {
+export function isDirectory(p: string): boolean {
   try {
     return fs.statSync(p).isDirectory();
   } catch {
@@ -89,4 +89,41 @@ export function tildify(target: string, pathEnv: PathEnv = currentEnv()): string
     return '~' + full.slice(homeKey.length);
   }
   return full;
+}
+
+/** True when two paths name the same folder, compared the way the file system does. */
+export function samePath(
+  a: string,
+  b: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return pathKey(a, platform) === pathKey(b, platform);
+}
+
+/**
+ * Claude Code's own settings file, which holds `cleanupPeriodDays`. With CLAUDE_CONFIG_DIR
+ * set, the first folder it lists; otherwise `~/.claude`.
+ */
+export function claudeSettingsFile(pathEnv: PathEnv = currentEnv()): string {
+  const p = pathFor(pathEnv.platform);
+  const configDir = (pathEnv.env.CLAUDE_CONFIG_DIR ?? '')
+    .split(',')
+    .map((dir) => dir.trim())
+    .find(Boolean);
+  return p.join(configDir ?? p.join(pathEnv.home, '.claude'), 'settings.json');
+}
+
+/**
+ * The `projects` folder meant by a folder picked by the user: picking the Claude folder
+ * itself (`~/.claude`) means its `projects` subfolder.
+ */
+export function logFolderFromPick(
+  picked: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const p = pathFor(platform);
+  const folder = stripTrailingSeparators(p.normalize(picked));
+  if (p.basename(folder).toLowerCase() === 'projects') return folder;
+  const inner = p.join(folder, 'projects');
+  return isDirectory(inner) ? inner : folder;
 }

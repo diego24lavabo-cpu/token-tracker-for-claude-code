@@ -667,6 +667,41 @@ export class UsageDatabase {
     this.refreshDerived();
   }
 
+  /**
+   * Tokens of this machine per folder project and subfolder, as stored (before container
+   * folders are split). `subfolder` is empty for the top of the folder.
+   */
+  folderUsage(): { project: string; subfolder: string; tokens: number }[] {
+    return this.raw
+      .prepare(
+        `SELECT project, subfolder, SUM(${TOKENS}) AS tokens
+         FROM messages GROUP BY project, subfolder`,
+      )
+      .all() as { project: string; subfolder: string; tokens: number }[];
+  }
+
+  /** Transcript files read so far, per `projects` folder. */
+  filesPerRoot(): Map<string, number> {
+    const rows = this.raw.prepare('SELECT root, COUNT(*) AS n FROM files GROUP BY root').all() as {
+      root: string;
+      n: number;
+    }[];
+    return new Map(rows.map((row) => [row.root, row.n]));
+  }
+
+  /**
+   * Forgets how far each transcript was read, so the next scan reads every file still on
+   * disk again, and rebuilds the derived tables at the end of it. No usage is deleted:
+   * deduplication keeps the records already stored, including those whose file is gone.
+   */
+  resetFileStates(): void {
+    this.raw.transaction(() => {
+      this.raw.exec('DELETE FROM files');
+      this.setSetting(SETTING_DERIVED_DIRTY, '1');
+    })();
+    this.rebuildAll = true;
+  }
+
   /** The local day (`YYYY-MM-DD`) of an instant, in that time zone. */
   localDay(timestampMs: number): string {
     return this.clock.toLocal(timestampMs).day;

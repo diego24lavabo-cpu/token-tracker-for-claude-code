@@ -10,5 +10,13 @@ export const IPC = {
   getSessions: 'usage:sessions',
   getSessionDetail: 'usage:session-detail',
   getAgents: 'usage:agents',
+  getSettings: 'settings:get',
+  setSettings: 'settings:set',
+  addLogFolder: 'settings:add-log-folder',
+  removeLogFolder: 'settings:remove-log-folder',
+  scanNow: 'settings:scan-now',
+  exportCsv: 'settings:export-csv',
+  rebuildDatabase: 'settings:rebuild-database',
+  keepHistoryLonger: 'settings:keep-history-longer',
   usageUpdated: 'usage:updated',
 } as const;

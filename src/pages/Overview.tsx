@@ -1,5 +1,6 @@
 import { FolderSearch } from 'lucide-react';
 import { useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import type { Overview as OverviewData } from '../../shared/types';
 import { EmptyState } from '../components/EmptyState';
 import { KpiCard } from '../components/KpiCard';
@@ -24,13 +25,30 @@ export function Overview() {
   const { data } = useUsageQuery(fetchOverview);
 
   if (data && !data.hasData) {
+    const noFolder = info !== null && info.logRoots.length === 0;
+    const folder = info?.logRoots[0] ?? info?.defaultLogRoot ?? '~/.claude/projects';
     return (
       <Page section="overview">
         <EmptyState
           icon={<FolderSearch size={22} strokeWidth={1.75} />}
           title={t.empty.title}
-          body={t.empty.body(info?.logRoots[0] ?? info?.defaultLogRoot ?? '~/.claude/projects')}
-        />
+          body={noFolder ? t.empty.noFolder(folder) : t.empty.body(folder)}
+        >
+          {info && !info.demo && (
+            <div className="empty-state-actions">
+              <button
+                type="button"
+                className="button button--primary"
+                onClick={() => void window.api.addLogFolder()}
+              >
+                {t.empty.pickFolder}
+              </button>
+              <Link to="/settings" className="button">
+                {t.empty.settings}
+              </Link>
+            </div>
+          )}
+        </EmptyState>
       </Page>
     );
   }

@@ -129,6 +129,51 @@ export function parsePricing(content: unknown): Pricing {
   return pricing;
 }
 
+/** The highest price per million tokens the editor accepts, to catch a misplaced decimal point. */
+export const MAX_PRICE = 10_000;
+const MAX_MODELS = 500;
+const MAX_MODEL_NAME = 200;
+
+/**
+ * Checks a price table sent by the Settings editor. Unlike `parsePricing`, nothing is
+ * dropped silently: an invalid entry throws, so the user's edit is never half applied.
+ * Default models missing from it are added back, as when the file is read.
+ */
+export function validatePricing(value: unknown): Pricing {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('pricing must be an object');
+  }
+  const input = value as Record<string, unknown>;
+  const { lastChecked, models } = input;
+  if (
+    lastChecked !== null &&
+    (typeof lastChecked !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(lastChecked))
+  ) {
+    throw new Error('lastChecked must be a day written as YYYY-MM-DD, or null');
+  }
+  if (typeof models !== 'object' || models === null || Array.isArray(models)) {
+    throw new Error('models must be an object');
+  }
+  const entries = Object.entries(models);
+  if (entries.length > MAX_MODELS) throw new Error('too many models');
+
+  const result: Pricing = { lastChecked, models: {} };
+  for (const [model, entry] of entries) {
+    if (model.trim() === '' || model.length > MAX_MODEL_NAME) throw new Error('invalid model name');
+    if (typeof entry !== 'object' || entry === null) throw new Error(`invalid prices for ${model}`);
+    const record = entry as Record<string, unknown>;
+    const prices = {} as ModelPrices;
+    for (const key of ['input', 'output', 'cacheWrite', 'cacheWrite1h', 'cacheRead'] as const) {
+      const price = record[key];
+      if (!isPrice(price) || price > MAX_PRICE)
+        throw new Error(`invalid ${key} price for ${model}`);
+      prices[key] = price;
+    }
+    result.models[model] = prices;
+  }
+  return parsePricing(result);
+}
+
 /**
  * Loads `pricing.json` from the given folder. A missing or unreadable file gives the
  * defaults, and a missing file is created so it can be found and edited.

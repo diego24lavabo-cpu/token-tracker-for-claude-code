@@ -21,6 +21,14 @@ const api: Api = {
   getSessionDetail: (machineId, sessionId) =>
     ipcRenderer.invoke(IPC.getSessionDetail, machineId, sessionId),
   getAgents: (filters) => ipcRenderer.invoke(IPC.getAgents, filters),
+  getSettings: () => ipcRenderer.invoke(IPC.getSettings),
+  setSettings: (patch) => ipcRenderer.invoke(IPC.setSettings, patch),
+  addLogFolder: () => ipcRenderer.invoke(IPC.addLogFolder),
+  removeLogFolder: (folder) => ipcRenderer.invoke(IPC.removeLogFolder, folder),
+  scanNow: () => ipcRenderer.invoke(IPC.scanNow),
+  exportCsv: (kind, filters) => ipcRenderer.invoke(IPC.exportCsv, kind, filters),
+  rebuildDatabase: () => ipcRenderer.invoke(IPC.rebuildDatabase),
+  keepHistoryLonger: () => ipcRenderer.invoke(IPC.keepHistoryLonger),
   onUsageUpdated: (callback) => {
     const listener = () => callback();
     ipcRenderer.on(IPC.usageUpdated, listener);

@@ -626,6 +626,99 @@ export interface Agents {
 }
 
 /** The API exposed to the renderer as `window.api` by the preload script. */
+// ── Settings ──────────────────────────────────────────────────────────────────
+
+/** A `projects` folder the app reads Claude Code transcripts from. */
+export interface LogFolder {
+  /** Absolute path: the folder's identity, for `removeLogFolder`. */
+  path: string;
+  /** The path shortened with `~`, for display. */
+  display: string;
+  /** True for a folder found by the app, false for one added in Settings. */
+  auto: boolean;
+  exists: boolean;
+  /** Transcript files read from this folder so far. */
+  files: number;
+}
+
+/** A folder project whose usage happened partly in subfolders: it may hold several projects. */
+export interface ContainerCandidate {
+  /** The folder project's name, as stored (before any split). */
+  name: string;
+  flagged: boolean;
+  /** All tokens of the folder project, on this machine. */
+  tokens: number;
+  /** Part of `tokens` used in subfolders rather than at the top of the folder. */
+  subfolderShare: number;
+  subfolderCount: number;
+  /** The subfolders with the most tokens, largest first (at most 4). */
+  topSubfolders: string[];
+}
+
+export interface SettingsData {
+  /** False in demo mode or when the database could not be opened: nothing can be changed. */
+  available: boolean;
+  sources: {
+    folders: LogFolder[];
+    filesScanned: number;
+    subagentFiles: number;
+    skippedLines: number;
+    /** Size of the database files in bytes, or null when unknown. */
+    databaseBytes: number | null;
+    /** The last finished scan, or null before the first one. */
+    lastScan: { at: string; durationMs: number } | null;
+  };
+  /** How long Claude Code keeps its transcripts, from its own settings file. */
+  retention: {
+    /** Claude Code's settings file, shortened with `~`. */
+    settingsFile: string;
+    /** The `cleanupPeriodDays` value, or null when the file does not set it. */
+    cleanupPeriodDays: number | null;
+    /** What Claude Code uses when the value is not set. */
+    defaultDays: number;
+    /** The value offered by "Keep Claude Code history longer". */
+    suggestedDays: number;
+    /** False when the file exists but is not valid JSON: the app then never writes it. */
+    readable: boolean;
+  };
+  containers: ContainerCandidate[];
+  pricing: {
+    current: Pricing;
+    defaults: Pricing;
+    /** Models with usage (all machines, all time), most tokens first. */
+    usedModels: { name: string; tokens: number }[];
+  };
+  app: {
+    version: string;
+    launchAtLogin: boolean;
+    /** Null when launch at login is available, otherwise why not. */
+    launchAtLoginUnavailable: 'development' | 'platform' | null;
+    fileWatching: boolean;
+    /** The app's data folder (database, pricing.json), shortened with `~`. */
+    dataFolder: string;
+  };
+}
+
+export interface SettingsPatch {
+  launchAtLogin?: boolean;
+  fileWatching?: boolean;
+  /** Replaces the list of folder projects split by subfolder. */
+  containerProjects?: string[];
+  pricing?: Pricing;
+}
+
+export type CsvKind = 'daily' | 'projects' | 'models' | 'agentTypes';
+
+export type ExportResult =
+  { status: 'saved'; file: string; rows: number } | { status: 'cancelled' } | { status: 'failed' };
+
+export type AddFolderResult =
+  | { status: 'added'; folder: string }
+  | { status: 'exists'; folder: string }
+  | { status: 'cancelled' };
+
+export type ActionResult = { status: 'done' } | { status: 'cancelled' } | { status: 'failed' };
+
 export interface Api {
   /** Available synchronously so the title bar can lay out on first paint. */
   platform: Platform;
@@ -642,6 +735,21 @@ export interface Api {
   /** Null when the session is not in the database. */
   getSessionDetail(machineId: string, sessionId: string): Promise<SessionDetail | null>;
   getAgents(filters: Filters): Promise<Agents>;
+  getSettings(): Promise<SettingsData>;
+  /** Applies the given changes, then sends `usageUpdated`. */
+  setSettings(patch: SettingsPatch): Promise<SettingsData>;
+  /** Asks for a `projects` folder with a folder picker, adds it and scans it. */
+  addLogFolder(): Promise<AddFolderResult>;
+  /** Stops reading a folder added in Settings. Its history stays in the database. */
+  removeLogFolder(folder: string): Promise<void>;
+  /** Reads what is new in the logs now. Resolves when the scan is over. */
+  scanNow(): Promise<void>;
+  /** Asks where to save, then writes a CSV of the given table for these filters. */
+  exportCsv(kind: CsvKind, filters: Filters): Promise<ExportResult>;
+  /** After a confirmation, reads every transcript still on disk again. History is kept. */
+  rebuildDatabase(): Promise<ActionResult>;
+  /** After a confirmation, raises `cleanupPeriodDays` in Claude Code's settings file. */
+  keepHistoryLonger(): Promise<ActionResult>;
   /** Subscribes to "usage data changed" events. Returns an unsubscribe function. */
   onUsageUpdated(callback: () => void): () => void;
 }

@@ -175,3 +175,33 @@ export function formatDuration(milliseconds: number): string {
   const rest = totalMinutes % 60;
   return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
 }
+
+const BYTE_UNITS = ['KB', 'MB', 'GB', 'TB'] as const;
+
+/** A file size: `812 B`, `4.2 MB`, `38 MB`, `1.3 GB` (1 KB = 1,024 bytes). */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return PLACEHOLDER;
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  let value = bytes;
+  let unit: (typeof BYTE_UNITS)[number] = 'KB';
+  for (const next of BYTE_UNITS) {
+    value /= 1024;
+    unit = next;
+    if (value < 1024) break;
+  }
+  return `${value < 10 ? oneDecimalFormat.format(value) : integerFormat.format(value)} ${unit}`;
+}
+
+/** How long ago an instant was: `just now`, `4 min ago`, `3 h ago`, then the day. */
+export function formatTimeAgo(iso: string, now: number = Date.now()): string {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return PLACEHOLDER;
+  const minutes = Math.floor((now - at) / 60_000);
+  if (minutes < 1) return en.dates.justNow;
+  if (minutes < 60) return en.dates.minutesAgo(minutes);
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return en.dates.hoursAgo(hours);
+  const date = new Date(at);
+  const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  return formatDay(day);
+}

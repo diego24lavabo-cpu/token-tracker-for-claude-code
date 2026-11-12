@@ -440,6 +440,65 @@ export function emptyOverview(filters: Filters): Overview {
   };
 }
 
+/** One day of the daily CSV export. */
+export interface DailyExportRow {
+  day: string;
+  /** The four token types as the logs count them. */
+  tokens: TokenBreakdown;
+  /** Tokens of all types used by subagents; part of the total. */
+  subagentTokens: number;
+  /** API responses, deduplicated. */
+  messages: number;
+  /** Null when none of the day's models has a price; 0 on a day without usage. */
+  cost: number | null;
+}
+
+/**
+ * Tokens per day with the four token types and the cost, for the CSV export. Same source
+ * and filters as the Overview's daily chart, with a row for every day of the period.
+ */
+export function getDailyExport(
+  db: UsageDatabase,
+  pricing: Pricing,
+  filters: Filters,
+): DailyExportRow[] {
+  const where = hourlyWhere(filters);
+  const rows = db.raw
+    .prepare(
+      `SELECT local_day AS day, ${MODEL_TOTALS}, SUM(messages) AS messages,
+              SUM(CASE WHEN kind <> 'main' THEN ${TOKENS} ELSE 0 END) AS subagent
+       FROM hourly WHERE ${where.sql} GROUP BY local_day, model`,
+    )
+    .all(...where.params) as (ModelTotals & { day: string; messages: number; subagent: number })[];
+
+  const byDay = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const list = byDay.get(row.day);
+    if (list) list.push(row);
+    else byDay.set(row.day, [row]);
+  }
+
+  return eachDay(filters.from, filters.to).map((day) => {
+    const models = byDay.get(day) ?? [];
+    const sum = (pick: (row: (typeof rows)[number]) => number) =>
+      models.reduce((total, row) => total + pick(row), 0);
+    const tokens: TokenBreakdown = {
+      input: sum((row) => row.input),
+      output: sum((row) => row.output),
+      cacheWrite: sum((row) => row.cache_write),
+      cacheRead: sum((row) => row.cache_read),
+    };
+    const empty = tokens.input + tokens.output + tokens.cacheWrite + tokens.cacheRead === 0;
+    return {
+      day,
+      tokens,
+      subagentTokens: sum((row) => row.subagent),
+      messages: sum((row) => row.messages),
+      cost: empty ? 0 : costOfModels(pricing, models).cost,
+    };
+  });
+}
+
 // ── Projects ──────────────────────────────────────────────────────────────────
 
 interface ProjectTotals {
