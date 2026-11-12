@@ -8,19 +8,33 @@ import {
   emptyOverview,
   emptyProjectDetail,
   emptyProjects,
+  emptySessions,
   getCalendar,
   getModels,
   getOverview,
   getProjectDetail,
   getProjects,
+  getSessionDetail,
+  getSessions,
   InvalidRequestError,
   parseFilters,
   parseMachineIds,
+  parsePage,
   parseProjectName,
+  parseSessionFilters,
+  parseSessionKey,
+  parseSessionSort,
+  SESSIONS_PAGE_SIZE,
 } from '../electron/aggregate';
 import type { UsageDatabase } from '../electron/db';
 import { scanLogs } from '../electron/scanner';
-import type { Filters, Pricing } from '../shared/types';
+import type {
+  Filters,
+  Pricing,
+  SessionFilters,
+  SessionSort,
+  TokenBreakdown,
+} from '../shared/types';
 import {
   assistantLine,
   cleanupTempDirs,
@@ -792,5 +806,302 @@ describe('getCalendar', () => {
     expect(parseMachineIds(['a', 'b'])).toEqual(['a', 'b']);
     expect(() => parseMachineIds('a')).toThrow(InvalidRequestError);
     expect(() => parseMachineIds([1])).toThrow(InvalidRequestError);
+  });
+});
+
+describe('getSessions', () => {
+  const S1 = '11111111-1111-4111-8111-111111111111';
+  const S2 = '22222222-2222-4222-8222-222222222222';
+  const S3 = '33333333-3333-4333-8333-333333333333';
+  const LATEST: SessionSort = { key: 'start', direction: 'desc' };
+
+  const sessions = (db: UsageDatabase, filters: SessionFilters, page = 0, sort = LATEST) =>
+    getSessions(db, PRICING, filters, page, sort);
+
+  it('lists the sessions of the period, subagents included, adding up to the Overview', async () => {
+    const db = await fixtureDb();
+    const result = sessions(db, BOTH_DAYS);
+    const overview = getOverview(db, PRICING, BOTH_DAYS, EVENING);
+
+    expect(result.hasData).toBe(true);
+    expect(result.total).toBe(3);
+    expect(result.rows.map((row) => row.id)).toEqual([S3, S1, S2]);
+    expect(result.rows.reduce((sum, row) => sum + row.tokens, 0)).toBe(overview.kpis.totalTokens);
+    expect(result.total).toBe(overview.shortcuts.sessions.count);
+    // Every model of a session is priced at its own rate, as on the Overview.
+    expect(result.rows.reduce((sum, row) => sum + row.cost!, 0)).toBeCloseTo(
+      overview.kpis.cost!,
+      12,
+    );
+
+    const s1 = result.rows.find((row) => row.id === S1)!;
+    expect(s1).toMatchObject({
+      machineId: db.machineId,
+      machine: 'test-machine',
+      project: 'demo-app',
+      model: 'Opus 5.5',
+      startDay: '2026-11-10',
+      // The main session's five responses; subagent calls are not messages.
+      messages: 5,
+      // Explore, the agent without meta, /btw and the workflow agent; not the warm-up.
+      subagents: 4,
+      tokens: 60349,
+      input: 60349 - 195 - 100 - 15 - 1 - 25 - 52,
+      output: 195 + 100 + 15 + 1 + 25 + 52,
+    });
+    expect(s1.startTime).toMatch(/^\d{2}:\d{2}$/);
+    expect(s1.start).toBe(
+      db.raw
+        .prepare('SELECT MIN(ts) FROM messages WHERE session_id = ? AND agent_id IS NULL')
+        .pluck()
+        .get(S1),
+    );
+  });
+
+  it('prices each model of a session at its own rate', async () => {
+    const db = await fixtureDb();
+    const opusOnly: Pricing = { lastChecked: null, models: { 'Opus 5.5': flat } };
+    const rows = getSessions(db, opusOnly, BOTH_DAYS, 0, LATEST).rows;
+    const overview = getOverview(db, opusOnly, BOTH_DAYS, EVENING);
+    const costs = rows.map((row) => row.cost ?? 0);
+    expect(costs.reduce((sum, cost) => sum + cost, 0)).toBeCloseTo(overview.kpis.cost!, 12);
+    // The Fable session has no price at all.
+    expect(rows.find((row) => row.id === S3)!.cost).toBeNull();
+  });
+
+  it('computes the KPIs and the histograms', async () => {
+    const db = await fixtureDb();
+    const { kpis, sizeHist, durationHist } = sessions(db, BOTH_DAYS);
+
+    expect(kpis.sessions).toBe(3);
+    expect(kpis.activeDays).toBe(2);
+    expect(kpis.sessionsPerActiveDay).toBe(1.5);
+    expect(kpis.averageTokens).toBeCloseTo(65134 / 3, 9);
+    expect(kpis.medianTokens).toBe(3675);
+    expect(kpis.averageMessages).toBeCloseTo((5 + 2 + 3) / 3, 9);
+    expect(kpis.biggest).toEqual({
+      id: S1,
+      machineId: db.machineId,
+      project: 'demo-app',
+      day: '2026-11-10',
+      tokens: 60349,
+    });
+    // <50k, 50–200k, 200–500k, 0.5–1M, ≥1M
+    expect(sizeHist).toEqual([2, 1, 0, 0, 0]);
+    expect(durationHist.reduce((sum, count) => sum + count, 0)).toBe(3);
+    expect(durationHist).toHaveLength(5);
+  });
+
+  it('pages and sorts every matching session', async () => {
+    const root = path.join(tempDir(), 'projects');
+    for (let i = 1; i <= 30; i++) {
+      const session = `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+      const minute = String(i).padStart(2, '0');
+      writeLines(path.join(root, MAC_FOLDER, `${session}.jsonl`), [
+        assistantLine({
+          id: `p${i}`,
+          session,
+          ts: `2026-11-10T10:${minute}:00.000Z`,
+          // Input grows with i, output shrinks.
+          u: [i * 100, 31 - i, 0, 0],
+        }),
+      ]);
+    }
+    const db = openMemoryDb();
+    open.push(db);
+    await scanLogs(db, [root]);
+    const day: Filters = { from: '2026-11-10', to: '2026-11-10' };
+    const idOf = (i: number) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+
+    const first = sessions(db, day);
+    expect(first.total).toBe(30);
+    expect(first.pageSize).toBe(SESSIONS_PAGE_SIZE);
+    expect(first.rows).toHaveLength(25);
+    expect(first.rows[0]!.id).toBe(idOf(30));
+
+    const second = sessions(db, day, 1);
+    expect(second.page).toBe(1);
+    expect(second.rows.map((row) => row.id)).toEqual([5, 4, 3, 2, 1].map(idOf));
+    // A page past the end gives the last one.
+    expect(sessions(db, day, 7).page).toBe(1);
+    expect(sessions(db, day, 7).rows).toEqual(second.rows);
+
+    const byInput = sessions(db, day, 0, { key: 'input', direction: 'asc' }).rows;
+    expect(byInput[0]!.id).toBe(idOf(1));
+    const byOutput = sessions(db, day, 0, { key: 'output', direction: 'desc' }).rows;
+    expect(byOutput[0]!.id).toBe(idOf(1));
+    expect(byOutput[0]!.output).toBe(30);
+    // The KPIs cover every page.
+    expect(first.kpis.sessions).toBe(30);
+    expect(second.kpis).toEqual(first.kpis);
+  });
+
+  it('puts sessions without a cost last, whatever the direction', async () => {
+    const db = await fixtureDb();
+    const opusOnly: Pricing = { lastChecked: null, models: { 'Opus 5.5': flat } };
+    for (const direction of ['asc', 'desc'] as const) {
+      const rows = getSessions(db, opusOnly, BOTH_DAYS, 0, { key: 'cost', direction }).rows;
+      expect(rows.at(-1)!.id).toBe(S3);
+    }
+    const byProject = sessions(db, BOTH_DAYS, 0, { key: 'project', direction: 'asc' }).rows;
+    // Ties keep the latest start first.
+    expect(byProject.map((row) => row.id)).toEqual([S1, S2, S3]);
+  });
+
+  it('filters by day: sessions with activity that day, as the Calendar counts them', async () => {
+    const root = path.join(tempDir(), 'projects');
+    writeLines(path.join(root, MAC_FOLDER, `${SESSION_A}.jsonl`), [
+      assistantLine({ id: 'a1', ts: '2026-11-09T23:50:00.000Z' }),
+      assistantLine({ id: 'a2', ts: '2026-11-10T00:10:00.000Z' }),
+      // 80 minutes later: a pause, left out of the active time.
+      assistantLine({ id: 'a3', ts: '2026-11-10T01:30:00.000Z' }),
+    ]);
+    writeLines(path.join(root, MAC_FOLDER, `${SESSION_B}.jsonl`), [
+      assistantLine({ id: 'b1', session: SESSION_B, ts: '2026-11-10T09:00:00.000Z' }),
+    ]);
+    const db = openMemoryDb();
+    open.push(db);
+    await scanLogs(db, [root]);
+    // The day replaces the period, whatever it is.
+    const elsewhere = { from: '2026-01-01', to: '2026-01-31' };
+    const ids = (day: string) => sessions(db, { ...elsewhere, day }).rows.map((row) => row.id);
+
+    expect(ids('2026-11-09')).toEqual([SESSION_A]);
+    expect(ids('2026-11-10')).toEqual([SESSION_B, SESSION_A]);
+    expect(ids('2026-11-11')).toEqual([]);
+    // The same counts as the heatmap.
+    const calendar = getCalendar(db, undefined, EVENING);
+    const cells = calendar.heatmap.weeks.flatMap((week) => week.days);
+    for (const day of ['2026-11-09', '2026-11-10']) {
+      expect(ids(day)).toHaveLength(cells.find((cell) => cell?.day === day)!.sessions);
+    }
+
+    const tenth = sessions(db, { ...elsewhere, day: '2026-11-10' });
+    expect(tenth.kpis.activeDays).toBe(1);
+    expect(tenth.kpis.sessionsPerActiveDay).toBe(2);
+    const a = tenth.rows.find((row) => row.id === SESSION_A)!;
+    // The session keeps its start day, and its whole size.
+    expect(a.startDay).toBe('2026-11-09');
+    expect(a.startTime).toBe('23:50');
+    expect(a.tokens).toBe(3 * 115);
+    expect(a.activeMs).toBe(20 * 60_000);
+
+    // Without a day, a session counts on its start day only.
+    const byStart = sessions(db, { from: '2026-11-10', to: '2026-11-10' });
+    expect(byStart.rows.map((row) => row.id)).toEqual([SESSION_B]);
+    // Other machines have no sessions by day until sync carries them.
+    expect(sessions(db, { ...elsewhere, day: '2026-11-10', machineIds: ['other'] }).total).toBe(0);
+  });
+
+  it('filters by project, model and machine', async () => {
+    const db = await fixtureDb();
+    const ids = (filters: Partial<SessionFilters>) =>
+      sessions(db, { ...BOTH_DAYS, ...filters }).rows.map((row) => row.id);
+
+    // A session belongs to every project it has activity in.
+    expect(ids({ projects: ['scratch-pad'] })).toEqual([S3]);
+    expect(ids({ projects: ['demo-app'] })).toEqual([S1, S2]);
+    expect(ids({ models: ['Fable 5.2'] })).toEqual([S3]);
+    expect(ids({ models: ['Sonnet 5.5'] })).toEqual([]);
+    expect(ids({ machineIds: [db.machineId] })).toHaveLength(3);
+    expect(ids({ machineIds: ['another-machine'] })).toEqual([]);
+
+    // The menus list the period's projects and models, whatever is picked in them.
+    const filtered = sessions(db, { ...BOTH_DAYS, projects: ['demo-app'], models: ['Opus 5.5'] });
+    expect(filtered.projects).toEqual(['demo-app', 'other-tool', 'scratch-pad']);
+    expect(filtered.models).toEqual(['Fable 5.2', 'Opus 5.5']);
+  });
+
+  it('describes an empty database', () => {
+    const db = openMemoryDb();
+    open.push(db);
+    expect(sessions(db, BOTH_DAYS)).toEqual(emptySessions());
+    expect(getSessionDetail(db, PRICING, db.machineId, S1)).toBeNull();
+  });
+});
+
+describe('getSessionDetail', () => {
+  const S1 = '11111111-1111-4111-8111-111111111111';
+
+  it('splits the session between the main session and its subagents', async () => {
+    const db = await fixtureDb();
+    const detail = getSessionDetail(db, PRICING, db.machineId, S1)!;
+    const row = getSessions(db, PRICING, BOTH_DAYS, 0, {
+      key: 'start',
+      direction: 'desc',
+    }).rows.find((session) => session.id === S1)!;
+
+    expect(detail.main).toEqual({ input: 660, output: 195, cacheWrite: 1500, cacheRead: 13100 });
+    const sum = (b: TokenBreakdown) => b.input + b.output + b.cacheWrite + b.cacheRead;
+    expect(sum(detail.main) + sum(detail.subagentTokens)).toBe(60349);
+    expect(detail.subagents.reduce((total, agent) => total + agent.tokens, 0)).toBe(
+      sum(detail.subagentTokens),
+    );
+    expect(detail.cost).toBeCloseTo(row.cost!, 12);
+    expect(detail.activeMs).toBe(row.activeMs);
+    expect(detail.spanMs).toBe(detail.end - detail.start);
+    expect(detail.subagentCount).toBe(4);
+    expect(detail.projects).toEqual([{ name: 'demo-app', tokens: 60349, share: 1 }]);
+  });
+
+  it('lists every subagent transcript, warm-ups included, oldest first', async () => {
+    const db = await fixtureDb();
+    const { subagents, timeline, start, end } = getSessionDetail(db, PRICING, db.machineId, S1)!;
+
+    expect(subagents).toHaveLength(5);
+    expect(subagents.map((agent) => agent.kind).sort()).toEqual([
+      'aside',
+      'task',
+      'task',
+      'warmup',
+      'workflow',
+    ]);
+    const starts = subagents.map((agent) => agent.start);
+    expect(starts).toEqual([...starts].sort((a, b) => a - b));
+    const explore = subagents.find((agent) => agent.type === 'Explore')!;
+    expect(explore).toMatchObject({ kind: 'task', model: 'Haiku 5.5', calls: 3, tokens: 21540 });
+    expect(explore.startupInput).toBeGreaterThan(0);
+    // The timeline covers the session and every subagent.
+    expect(timeline.from).toBeLessThanOrEqual(Math.min(start, ...starts));
+    expect(timeline.to).toBeGreaterThanOrEqual(
+      Math.max(end, ...subagents.map((agent) => agent.end)),
+    );
+  });
+
+  it('returns null for an unknown session', async () => {
+    const db = await fixtureDb();
+    expect(getSessionDetail(db, PRICING, db.machineId, 'nope')).toBeNull();
+    expect(getSessionDetail(db, PRICING, 'another-machine', S1)).toBeNull();
+  });
+});
+
+describe('session request checks', () => {
+  it('accepts a day, or nothing, on top of the filters', () => {
+    expect(parseSessionFilters({ ...BOTH_DAYS, day: '2026-11-10' }).day).toBe('2026-11-10');
+    expect(parseSessionFilters(BOTH_DAYS).day).toBeUndefined();
+    expect(() => parseSessionFilters({ ...BOTH_DAYS, day: '2026-02-30' })).toThrow(
+      InvalidRequestError,
+    );
+    expect(() => parseSessionFilters({ day: '2026-11-10' })).toThrow(InvalidRequestError);
+  });
+
+  it('checks the page, the sort and the session key', () => {
+    expect(parsePage(0)).toBe(0);
+    expect(parsePage(3)).toBe(3);
+    for (const page of [-1, 1.5, '1', null]) {
+      expect(() => parsePage(page)).toThrow(InvalidRequestError);
+    }
+    expect(parseSessionSort({ key: 'cost', direction: 'asc' })).toEqual({
+      key: 'cost',
+      direction: 'asc',
+    });
+    expect(() => parseSessionSort({ key: 'secret', direction: 'asc' })).toThrow(
+      InvalidRequestError,
+    );
+    expect(() => parseSessionSort({ key: 'cost', direction: 'up' })).toThrow(InvalidRequestError);
+    expect(() => parseSessionSort(null)).toThrow(InvalidRequestError);
+    expect(parseSessionKey('m', 's')).toEqual({ machineId: 'm', sessionId: 's' });
+    expect(() => parseSessionKey('', 's')).toThrow(InvalidRequestError);
+    expect(() => parseSessionKey('m', 42)).toThrow(InvalidRequestError);
   });
 });

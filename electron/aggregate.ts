@@ -32,7 +32,15 @@ import type {
   ProjectDetail,
   ProjectRow,
   Projects,
+  SessionDetail,
+  SessionFilters,
+  SessionRow,
+  Sessions,
+  SessionSort,
+  SessionSortKey,
+  SessionSubagent,
   Streak,
+  TokenBreakdown,
 } from '../shared/types';
 import type { UsageDatabase } from './db';
 import { costOf } from './pricing';
@@ -1008,5 +1016,489 @@ export function emptyCalendar(today: string): Calendar {
     bestWeekday: null,
     byHour: Array.from({ length: 24 }, () => 0),
     byMonth: lastMonths(today).map((month) => ({ month, tokens: 0 })),
+  };
+}
+
+// ── Sessions ──────────────────────────────────────────────────────────────────
+
+/** Rows per page of the sessions table. */
+export const SESSIONS_PAGE_SIZE = 25;
+/** Upper bounds (excluded) of the first four size bins; the fifth has none. */
+const SIZE_BOUNDS = [50_000, 200_000, 500_000, 1_000_000];
+/** Upper bounds (excluded) of the first four duration bins, in milliseconds. */
+const DURATION_BOUNDS = [10, 30, 60, 120].map((minutes) => minutes * 60_000);
+const SESSION_SORT_KEYS: readonly SessionSortKey[] = [
+  'start',
+  'machine',
+  'project',
+  'model',
+  'duration',
+  'messages',
+  'subagents',
+  'input',
+  'output',
+  'cost',
+];
+const MAX_PAGE = 1_000_000;
+
+/** Checks the filters of `getSessions` received over IPC. */
+export function parseSessionFilters(value: unknown): SessionFilters {
+  const filters = parseFilters(value);
+  const day = (value as Record<string, unknown>).day;
+  if (day === undefined || day === null) return filters;
+  if (!isDay(day)) throw new InvalidRequestError('day must be a day written as YYYY-MM-DD');
+  return { ...filters, day };
+}
+
+/** Checks a page number received over IPC (from 0). */
+export function parsePage(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > MAX_PAGE) {
+    throw new InvalidRequestError('page must be a whole number from 0');
+  }
+  return value;
+}
+
+/** Checks the sort order of the sessions table received over IPC. */
+export function parseSessionSort(value: unknown): SessionSort {
+  const input = (typeof value === 'object' && value !== null ? value : {}) as Record<
+    string,
+    unknown
+  >;
+  const { key, direction } = input;
+  if (typeof key !== 'string' || !(SESSION_SORT_KEYS as readonly string[]).includes(key)) {
+    throw new InvalidRequestError('sort.key is not a column of the sessions table');
+  }
+  if (direction !== 'asc' && direction !== 'desc') {
+    throw new InvalidRequestError('sort.direction must be asc or desc');
+  }
+  return { key: key as SessionSortKey, direction };
+}
+
+/** Checks a machine id and a session id received over IPC. */
+export function parseSessionKey(
+  machineId: unknown,
+  sessionId: unknown,
+): { machineId: string; sessionId: string } {
+  const valid = (value: unknown): value is string =>
+    typeof value === 'string' && value.length > 0 && value.length <= MAX_NAME_LENGTH;
+  if (!valid(machineId) || !valid(sessionId)) {
+    throw new InvalidRequestError('machineId and sessionId must be non-empty strings');
+  }
+  return { machineId, sessionId };
+}
+
+/**
+ * Condition on `sessions s` for the Sessions page. Without a day, a session counts on its
+ * start day, like every session count. With a day, the sessions with activity that day
+ * count, subagents included, as the Calendar shows them: a session that runs past
+ * midnight is on both days. `messages` holds this machine's responses only, so other
+ * machines have no sessions by day until sync carries them.
+ * `lists` = false leaves out the project and model filters, for the filter menus.
+ */
+function sessionsWhere(db: UsageDatabase, filters: SessionFilters, lists = true): Where {
+  const where: Where = filters.day
+    ? {
+        sql: `s.machine_id = ? AND s.session_id IN (
+                SELECT session_id FROM messages WHERE local_day = ?)`,
+        params: [db.machineId, filters.day],
+      }
+    : { sql: 's.start_day BETWEEN ? AND ?', params: [filters.from, filters.to] };
+  inList('s.machine_id', filters.machineIds, where);
+  if (!lists) return where;
+
+  // A session belongs to every project it has activity in, as on the Projects page.
+  if (filters.projects) {
+    if (filters.projects.length === 0) {
+      where.sql += ' AND 0';
+    } else {
+      where.sql += ` AND EXISTS (SELECT 1 FROM session_projects sp
+        WHERE sp.machine_id = s.machine_id AND sp.session_id = s.session_id
+          AND sp.project IN (${filters.projects.map(() => '?').join(', ')}))`;
+      where.params.push(...filters.projects);
+    }
+  }
+  // The model column: the main session's model.
+  inList('s.model', filters.models, where);
+  return where;
+}
+
+interface SessionDbRow {
+  machine_id: string;
+  session_id: string;
+  machine: string;
+  project: string;
+  model: string;
+  start_ts: number;
+  end_ts: number;
+  start_day: string;
+  messages: number;
+  input: number;
+  output: number;
+  cache_write: number;
+  cache_read: number;
+  cache_write_1h: number;
+  subagent_count: number;
+  active_ms: number;
+}
+
+const SESSION_COLUMNS = `s.machine_id, s.session_id, COALESCE(m.name, s.machine_id) AS machine,
+  s.project, s.model, s.start_ts, s.end_ts, s.start_day, s.messages,
+  s.input, s.output, s.cache_write, s.cache_read, s.cache_write_1h,
+  s.subagent_count, s.active_ms`;
+
+const sessionKey = (machineId: string, sessionId: string) => `${machineId}\n${sessionId}`;
+
+type CostResult = { cost: number | null; costIsPartial: boolean };
+
+/**
+ * The estimated cost of sessions, keyed by `sessionKey`. This machine's sessions are
+ * priced model by model from their responses; a session of another machine only has its
+ * main model, which then prices all its tokens.
+ */
+function sessionCosts(
+  db: UsageDatabase,
+  pricing: Pricing,
+  rows: readonly SessionDbRow[],
+  where: Where,
+): Map<string, CostResult> {
+  const byModel = new Map<string, ModelTotals[]>();
+  const local = db.raw
+    .prepare(
+      `SELECT session_id, ${MODEL_TOTALS} FROM messages
+       WHERE session_id IN (SELECT s.session_id FROM sessions s
+                            WHERE ${where.sql} AND s.machine_id = ?)
+       GROUP BY session_id, model`,
+    )
+    .all(...where.params, db.machineId) as (ModelTotals & { session_id: string })[];
+  for (const row of local) {
+    const list = byModel.get(row.session_id) ?? [];
+    list.push(row);
+    byModel.set(row.session_id, list);
+  }
+
+  const costs = new Map<string, CostResult>();
+  for (const row of rows) {
+    const models = (row.machine_id === db.machineId ? byModel.get(row.session_id) : undefined) ?? [
+      row,
+    ];
+    costs.set(sessionKey(row.machine_id, row.session_id), costOfModels(pricing, models));
+  }
+  return costs;
+}
+
+function median(sorted: readonly number[]): number | null {
+  const n = sorted.length;
+  if (n === 0) return null;
+  const middle = Math.floor(n / 2);
+  return n % 2 === 1 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+}
+
+function average(values: readonly number[]): number | null {
+  return values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+/** Counts values per bin; `bounds` are the excluded upper bounds of all bins but the last. */
+function histogram(values: readonly number[], bounds: readonly number[]): number[] {
+  const bins = Array.from({ length: bounds.length + 1 }, () => 0);
+  for (const value of values) {
+    const index = bounds.findIndex((bound) => value < bound);
+    bins[index === -1 ? bounds.length : index]!++;
+  }
+  return bins;
+}
+
+const collator = new Intl.Collator('en-US', { numeric: true, sensitivity: 'base' });
+
+function sessionSortValue(row: SessionRow, key: SessionSortKey): number | string | null {
+  switch (key) {
+    case 'start':
+      return row.start;
+    case 'machine':
+      return row.machine;
+    case 'project':
+      return row.project;
+    case 'model':
+      return row.model;
+    case 'duration':
+      return row.activeMs;
+    case 'messages':
+      return row.messages;
+    case 'subagents':
+      return row.subagents;
+    case 'input':
+      return row.input;
+    case 'output':
+      return row.output;
+    case 'cost':
+      return row.cost;
+  }
+}
+
+/** Sorts in place. No value (a cost without price) goes last; ties go to the latest start. */
+function sortSessions(rows: SessionRow[], sort: SessionSort): void {
+  const sign = sort.direction === 'asc' ? 1 : -1;
+  rows.sort((a, b) => {
+    const left = sessionSortValue(a, sort.key);
+    const right = sessionSortValue(b, sort.key);
+    if (left !== right) {
+      if (left === null) return 1;
+      if (right === null) return -1;
+      const order =
+        typeof left === 'number' && typeof right === 'number'
+          ? left - right
+          : collator.compare(String(left), String(right));
+      if (order !== 0) return sign * order;
+    }
+    return b.start - a.start || collator.compare(a.id, b.id);
+  });
+}
+
+/**
+ * The Sessions page: KPIs and histograms of every matching session, and one page of the
+ * table. Token columns include the subagents; durations are active time.
+ */
+export function getSessions(
+  db: UsageDatabase,
+  pricing: Pricing,
+  filters: SessionFilters,
+  page: number,
+  sort: SessionSort,
+): Sessions {
+  const raw = db.raw;
+  const where = sessionsWhere(db, filters);
+  const dbRows = raw
+    .prepare(
+      `SELECT ${SESSION_COLUMNS}
+       FROM sessions s LEFT JOIN machines m ON m.id = s.machine_id
+       WHERE ${where.sql}`,
+    )
+    .all(...where.params) as SessionDbRow[];
+  const costs = sessionCosts(db, pricing, dbRows, where);
+
+  const rows: SessionRow[] = dbRows.map((row) => {
+    const input = row.input + row.cache_write + row.cache_read;
+    return {
+      id: row.session_id,
+      machineId: row.machine_id,
+      machine: row.machine,
+      project: row.project,
+      model: row.model,
+      start: row.start_ts,
+      startDay: row.start_day,
+      startTime: db.localDayTime(row.start_ts).time,
+      activeMs: row.active_ms,
+      messages: row.messages,
+      subagents: row.subagent_count,
+      input,
+      output: row.output,
+      tokens: input + row.output,
+      cost: costs.get(sessionKey(row.machine_id, row.session_id))?.cost ?? null,
+    };
+  });
+
+  const tokens = rows.map((row) => row.tokens).sort((a, b) => a - b);
+  const durations = rows.map((row) => row.activeMs).sort((a, b) => a - b);
+  const activeDays = filters.day
+    ? Math.min(rows.length, 1)
+    : new Set(rows.map((row) => row.startDay)).size;
+  let biggest: SessionRow | undefined;
+  for (const row of rows) {
+    if (
+      !biggest ||
+      row.tokens > biggest.tokens ||
+      (row.tokens === biggest.tokens && row.start > biggest.start)
+    ) {
+      biggest = row;
+    }
+  }
+
+  sortSessions(rows, sort);
+  const lastPage = Math.max(0, Math.ceil(rows.length / SESSIONS_PAGE_SIZE) - 1);
+  const shown = Math.min(page, lastPage);
+
+  // The filter menus list what the period offers, whatever is picked in them.
+  const scope = sessionsWhere(db, filters, false);
+  const projects = raw
+    .prepare(
+      `SELECT DISTINCT sp.project FROM session_projects sp
+       JOIN sessions s ON s.machine_id = sp.machine_id AND s.session_id = sp.session_id
+       WHERE ${scope.sql}`,
+    )
+    .pluck()
+    .all(...scope.params) as string[];
+  const models = raw
+    .prepare(`SELECT DISTINCT s.model FROM sessions s WHERE ${scope.sql}`)
+    .pluck()
+    .all(...scope.params) as string[];
+
+  return {
+    hasData: hasAnyUsage(db, filters.machineIds),
+    kpis: {
+      sessions: rows.length,
+      activeDays,
+      sessionsPerActiveDay: activeDays > 0 ? rows.length / activeDays : null,
+      averageActiveMs: average(durations),
+      medianActiveMs: median(durations),
+      averageTokens: average(tokens),
+      medianTokens: median(tokens),
+      averageMessages: average(rows.map((row) => row.messages)),
+      biggest: biggest
+        ? {
+            id: biggest.id,
+            machineId: biggest.machineId,
+            project: biggest.project,
+            day: biggest.startDay,
+            tokens: biggest.tokens,
+          }
+        : null,
+    },
+    sizeHist: histogram(tokens, SIZE_BOUNDS),
+    durationHist: histogram(durations, DURATION_BOUNDS),
+    rows: rows.slice(shown * SESSIONS_PAGE_SIZE, (shown + 1) * SESSIONS_PAGE_SIZE),
+    total: rows.length,
+    page: shown,
+    pageSize: SESSIONS_PAGE_SIZE,
+    projects: projects.sort(collator.compare),
+    models: models.sort(collator.compare),
+  };
+}
+
+/** What the Sessions page shows when there is no database to read. */
+export function emptySessions(): Sessions {
+  return {
+    hasData: false,
+    kpis: {
+      sessions: 0,
+      activeDays: 0,
+      sessionsPerActiveDay: null,
+      averageActiveMs: null,
+      medianActiveMs: null,
+      averageTokens: null,
+      medianTokens: null,
+      averageMessages: null,
+      biggest: null,
+    },
+    sizeHist: histogram([], SIZE_BOUNDS),
+    durationHist: histogram([], DURATION_BOUNDS),
+    rows: [],
+    total: 0,
+    page: 0,
+    pageSize: SESSIONS_PAGE_SIZE,
+    projects: [],
+    models: [],
+  };
+}
+
+interface SubagentDbRow {
+  agent_id: string;
+  agent_type: string;
+  kind: SessionSubagent['kind'];
+  model: string;
+  start_ts: number;
+  end_ts: number;
+  active_ms: number;
+  calls: number;
+  startup_input: number;
+  input: number;
+  output: number;
+  cache_write: number;
+  cache_read: number;
+}
+
+/** The drawer of one session: main vs subagent tokens, and its subagent invocations. */
+export function getSessionDetail(
+  db: UsageDatabase,
+  pricing: Pricing,
+  machineId: string,
+  sessionId: string,
+): SessionDetail | null {
+  const raw = db.raw;
+  const session = raw
+    .prepare(
+      `SELECT ${SESSION_COLUMNS}
+       FROM sessions s LEFT JOIN machines m ON m.id = s.machine_id
+       WHERE s.machine_id = ? AND s.session_id = ?`,
+    )
+    .get(machineId, sessionId) as SessionDbRow | undefined;
+  if (!session) return null;
+
+  const agents = raw
+    .prepare(
+      `SELECT agent_id, agent_type, kind, model, start_ts, end_ts, active_ms, calls,
+              startup_input, input, output, cache_write, cache_read
+       FROM subagents WHERE machine_id = ? AND session_id = ?
+       ORDER BY start_ts, agent_id`,
+    )
+    .all(machineId, sessionId) as SubagentDbRow[];
+
+  const subagentTokens: TokenBreakdown = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+  let from = session.start_ts;
+  let to = session.end_ts;
+  const subagents: SessionSubagent[] = agents.map((agent) => {
+    subagentTokens.input += agent.input;
+    subagentTokens.output += agent.output;
+    subagentTokens.cacheWrite += agent.cache_write;
+    subagentTokens.cacheRead += agent.cache_read;
+    from = Math.min(from, agent.start_ts);
+    to = Math.max(to, agent.end_ts);
+    const { day, time } = db.localDayTime(agent.start_ts);
+    return {
+      agentId: agent.agent_id,
+      type: agent.agent_type,
+      kind: agent.kind,
+      model: agent.model,
+      start: agent.start_ts,
+      end: agent.end_ts,
+      startDay: day,
+      startTime: time,
+      activeMs: agent.active_ms,
+      calls: agent.calls,
+      startupInput: agent.startup_input,
+      tokens: agent.input + agent.output + agent.cache_write + agent.cache_read,
+    };
+  });
+
+  const total = session.input + session.output + session.cache_write + session.cache_read;
+  const projectRows = raw
+    .prepare(
+      `SELECT project AS name, tokens FROM session_projects
+       WHERE machine_id = ? AND session_id = ?`,
+    )
+    .all(machineId, sessionId) as { name: string; tokens: number }[];
+  projectRows.sort(byTokens);
+
+  const keyWhere: Where = {
+    sql: 's.machine_id = ? AND s.session_id = ?',
+    params: [machineId, sessionId],
+  };
+  const cost = sessionCosts(db, pricing, [session], keyWhere).get(
+    sessionKey(machineId, sessionId),
+  )!;
+
+  return {
+    id: sessionId,
+    machineId,
+    machine: session.machine,
+    project: session.project,
+    model: session.model,
+    start: session.start_ts,
+    end: session.end_ts,
+    startDay: session.start_day,
+    startTime: db.localDayTime(session.start_ts).time,
+    activeMs: session.active_ms,
+    spanMs: session.end_ts - session.start_ts,
+    messages: session.messages,
+    subagentCount: session.subagent_count,
+    main: {
+      input: session.input - subagentTokens.input,
+      output: session.output - subagentTokens.output,
+      cacheWrite: session.cache_write - subagentTokens.cacheWrite,
+      cacheRead: session.cache_read - subagentTokens.cacheRead,
+    },
+    subagentTokens,
+    ...cost,
+    projects: projectRows.map((row) => ({ ...row, share: ratio(row.tokens, total) })),
+    subagents,
+    timeline: { from, to },
   };
 }

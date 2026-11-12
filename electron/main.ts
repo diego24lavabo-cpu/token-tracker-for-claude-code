@@ -15,6 +15,8 @@ import type {
   Pricing,
   ProjectDetail,
   Projects,
+  SessionDetail,
+  Sessions,
 } from '../shared/types';
 import {
   emptyCalendar,
@@ -22,14 +24,21 @@ import {
   emptyOverview,
   emptyProjectDetail,
   emptyProjects,
+  emptySessions,
   getCalendar,
   getModels,
   getOverview,
   getProjectDetail,
   getProjects,
+  getSessionDetail,
+  getSessions,
   parseFilters,
   parseMachineIds,
+  parsePage,
   parseProjectName,
+  parseSessionFilters,
+  parseSessionKey,
+  parseSessionSort,
 } from './aggregate';
 import { UsageDatabase } from './db';
 import { installAppMenu } from './menu';
@@ -235,6 +244,18 @@ function registerIpc(): void {
   handle<Calendar>(IPC.getCalendar, (_event, input) => {
     const machineIds = parseMachineIds(input);
     return database ? getCalendar(database, machineIds) : emptyCalendar(localDay(new Date()));
+  });
+
+  handle<Sessions>(IPC.getSessions, (_event, filtersInput, pageInput, sortInput) => {
+    const filters = parseSessionFilters(filtersInput);
+    const page = parsePage(pageInput);
+    const sort = parseSessionSort(sortInput);
+    return database ? getSessions(database, pricing, filters, page, sort) : emptySessions();
+  });
+
+  handle<SessionDetail | null>(IPC.getSessionDetail, (_event, machineInput, sessionInput) => {
+    const { machineId, sessionId } = parseSessionKey(machineInput, sessionInput);
+    return database ? getSessionDetail(database, pricing, machineId, sessionId) : null;
   });
 }
 

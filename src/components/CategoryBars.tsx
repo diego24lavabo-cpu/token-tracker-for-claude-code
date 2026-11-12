@@ -10,7 +10,8 @@ export interface CategoryItem {
   label: string;
   /** At the top of the tooltip. */
   title: string;
-  tokens: number;
+  /** Tokens by default; a count in a histogram. */
+  value: number;
   /** Drawn in `--accent-light`, such as the busiest weekday. */
   highlight?: boolean;
 }
@@ -24,16 +25,25 @@ interface CategoryBarsProps {
   label: string;
   /** The tooltip row with each bar's share of the total. */
   shareLabel: string;
+  /** The tooltip row with the value. Default: tokens. */
+  valueLabel?: string;
+  formatValue?: (value: number) => string;
 }
 
-/** One bar per category, all of them labeled: weekdays, months. */
-export function CategoryBars({ items, label, shareLabel }: CategoryBarsProps) {
-  const total = items.reduce((sum, item) => sum + item.tokens, 0);
+/** One bar per category, all of them labeled: weekdays, months, histogram bins. */
+export function CategoryBars({
+  items,
+  label,
+  shareLabel,
+  valueLabel = en.charts.tokens,
+  formatValue = formatTokens,
+}: CategoryBarsProps) {
+  const total = items.reduce((sum, item) => sum + item.value, 0);
   const data: CategoryPoint[] = items.map((item) => ({
     ...item,
-    share: total > 0 ? item.tokens / total : 0,
+    share: total > 0 ? item.value / total : 0,
   }));
-  const top = niceCeil(Math.max(0, ...items.map((item) => item.tokens)));
+  const top = niceCeil(Math.max(0, ...items.map((item) => item.value)));
 
   return (
     <div className="chart" role="img" aria-label={label}>
@@ -53,11 +63,17 @@ export function CategoryBars({ items, label, shareLabel }: CategoryBarsProps) {
           />
           <YAxis domain={[0, top]} hide />
           <Tooltip
-            content={<CategoryTooltip shareLabel={shareLabel} />}
+            content={
+              <CategoryTooltip
+                shareLabel={shareLabel}
+                valueLabel={valueLabel}
+                formatValue={formatValue}
+              />
+            }
             cursor={BAR_CURSOR}
             isAnimationActive={false}
           />
-          <Bar dataKey="tokens" radius={[2, 2, 0, 0]} maxBarSize={64} isAnimationActive={false}>
+          <Bar dataKey="value" radius={[2, 2, 0, 0]} maxBarSize={64} isAnimationActive={false}>
             {data.map((point) => (
               <Cell
                 key={point.key}
@@ -73,16 +89,24 @@ export function CategoryBars({ items, label, shareLabel }: CategoryBarsProps) {
 
 interface CategoryTooltipProps {
   shareLabel: string;
+  valueLabel: string;
+  formatValue: (value: number) => string;
   active?: boolean;
   payload?: ReadonlyArray<{ payload?: CategoryPoint }>;
 }
 
-function CategoryTooltip({ shareLabel, active, payload }: CategoryTooltipProps) {
+function CategoryTooltip({
+  shareLabel,
+  valueLabel,
+  formatValue,
+  active,
+  payload,
+}: CategoryTooltipProps) {
   const point = payload?.[0]?.payload;
   if (!active || !point) return null;
   return (
     <ChartTooltip title={point.title}>
-      <TooltipRow label={en.charts.tokens} value={formatTokens(point.tokens)} strong />
+      <TooltipRow label={valueLabel} value={formatValue(point.value)} strong />
       <TooltipRow label={shareLabel} value={formatPercent(point.share)} />
     </ChartTooltip>
   );

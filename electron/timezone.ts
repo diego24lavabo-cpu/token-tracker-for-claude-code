@@ -22,10 +22,17 @@ export interface LocalTime {
   hour: number;
 }
 
+/** A local time down to the minute. */
+export interface LocalMinute extends LocalTime {
+  /** 0 to 59. */
+  minute: number;
+}
+
 export interface LocalClock {
   /** The zone actually used; `UTC` when the requested zone is unknown. */
   readonly timeZone: string;
   toLocal(timestampMs: number): LocalTime;
+  toLocalMinute(timestampMs: number): LocalMinute;
 }
 
 /** Zone offsets only change on quarter-hour boundaries, so one lookup per quarter is enough. */
@@ -88,6 +95,14 @@ export function createLocalClock(timeZone: string): LocalClock {
     toLocal(timestampMs) {
       const local = new Date(timestampMs + offsetAt(timestampMs));
       return { day: local.toISOString().slice(0, 10), hour: local.getUTCHours() };
+    },
+    toLocalMinute(timestampMs) {
+      const local = new Date(timestampMs + offsetAt(timestampMs));
+      return {
+        day: local.toISOString().slice(0, 10),
+        hour: local.getUTCHours(),
+        minute: local.getUTCMinutes(),
+      };
     },
   };
 }

@@ -150,7 +150,7 @@ function WeekdayCard({ data }: { data: CalendarData | null }) {
         key: label,
         label,
         title: en.dates.weekdaysLong[index]!,
-        tokens: data?.byWeekday[index] ?? 0,
+        value: data?.byWeekday[index] ?? 0,
         highlight: index === data?.bestWeekday,
       })),
     [data],
@@ -187,7 +187,7 @@ function MonthCard({ data }: { data: CalendarData | null }) {
         key: point.month,
         label: formatMonth(point.month),
         title: index === months.length - 1 ? `${title} · ${t.month.soFar}` : title,
-        tokens: point.tokens,
+        value: point.tokens,
       };
     });
   }, [data]);

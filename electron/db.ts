@@ -672,6 +672,13 @@ export class UsageDatabase {
     return this.clock.toLocal(timestampMs).day;
   }
 
+  /** The local day and clock time (`HH:MM`) of an instant, in that time zone. */
+  localDayTime(timestampMs: number): { day: string; time: string } {
+    const local = this.clock.toLocalMinute(timestampMs);
+    const pad = (value: number) => String(value).padStart(2, '0');
+    return { day: local.day, time: `${pad(local.hour)}:${pad(local.minute)}` };
+  }
+
   // ── Settings and machines ───────────────────────────────────────────────────
 
   getSetting(key: string): string | null {

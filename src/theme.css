@@ -1454,6 +1454,381 @@ button {
   }
 }
 
+/* ── Sessions page ─────────────────────────────────────────── */
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-top: calc(-1 * var(--space-2));
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 6px 0 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--accent-bg);
+  font-size: 13px;
+}
+
+.filter-chip-remove {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--accent-light);
+  cursor: pointer;
+  place-items: center;
+}
+
+.filter-chip-remove:hover {
+  background: rgba(240, 238, 230, 0.08);
+  color: var(--text);
+}
+
+.select-field {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.select-field:focus-within {
+  border-color: var(--accent);
+}
+
+.select-field.is-active {
+  border-color: var(--accent-dark);
+}
+
+.select-field select {
+  max-width: 220px;
+  padding: 0 20px 0 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  appearance: none;
+  cursor: pointer;
+}
+
+.select-field option {
+  background: var(--bg-card);
+  color: var(--text);
+}
+
+.select-field svg {
+  position: absolute;
+  right: 8px;
+  pointer-events: none;
+}
+
+.filter-clear {
+  padding: 0 var(--space-1);
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.filter-clear:hover {
+  color: var(--accent-light);
+  text-decoration: underline;
+}
+
+.sessions-charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.sessions-chart .chart-card-body {
+  flex: none;
+  height: 200px;
+}
+
+.sessions-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-5);
+}
+
+.sessions-table {
+  transition: opacity 120ms ease;
+}
+
+.sessions-table.is-loading {
+  opacity: 0.75;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-1) 0 var(--space-1);
+}
+
+.pager-range {
+  margin-right: var(--space-2);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.icon-button {
+  display: grid;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-button);
+  background: var(--bg-surface);
+  color: var(--text);
+  cursor: pointer;
+  place-items: center;
+}
+
+.icon-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-light);
+}
+
+.icon-button:disabled {
+  color: var(--text-muted);
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* Over the right side of the page; next to the table on a large monitor (below). */
+.session-drawer {
+  position: fixed;
+  z-index: 20;
+  top: calc(var(--titlebar-height) + var(--space-3));
+  right: var(--space-3);
+  bottom: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  width: min(480px, calc(100vw - var(--sidebar-width) - 2 * var(--space-3)));
+  padding: 20px;
+  overflow-y: auto;
+  border-color: var(--accent);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  transition: opacity 120ms ease;
+}
+
+.session-drawer:focus {
+  outline: none;
+}
+
+.session-drawer.is-loading {
+  opacity: 0.75;
+}
+
+.session-drawer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.session-drawer-heading {
+  min-width: 0;
+}
+
+.session-drawer-heading .card-title {
+  overflow-wrap: anywhere;
+}
+
+.session-drawer-project {
+  color: var(--accent);
+}
+
+.session-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--space-3) var(--space-4);
+  margin: 0;
+}
+
+.session-stat {
+  min-width: 0;
+}
+
+.session-stat--wide {
+  grid-column: 1 / -1;
+}
+
+.session-stat dt {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.session-stat dd {
+  margin: 2px 0 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-stat--wide dd {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: normal;
+}
+
+.session-types {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.session-types th,
+.session-types td {
+  padding: 5px 0;
+  font-weight: 400;
+  text-align: right;
+}
+
+.session-types thead th {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.session-types tbody tr {
+  border-top: 1px solid var(--border);
+}
+
+.session-types tbody th {
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.session-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.timeline-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: 13px;
+}
+
+.timeline-type {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-kind {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.timeline-start {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* The faint band is the main session; the bar is the subagent run within it. */
+.timeline-track {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--heat-0);
+}
+
+.timeline-session {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(142, 74, 51, 0.45);
+}
+
+.timeline-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 4px;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.timeline-item.is-warmup .timeline-bar {
+  background: var(--text-muted);
+}
+
+.timeline-item.is-warmup .timeline-type {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.timeline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--space-3);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.timeline-tokens {
+  color: var(--text);
+}
+
+@media (min-width: 1600px) {
+  .sessions-layout.has-drawer {
+    grid-template-columns: minmax(0, 2fr) minmax(420px, 1fr);
+  }
+
+  .session-drawer {
+    position: sticky;
+    top: var(--space-5);
+    right: auto;
+    bottom: auto;
+    width: auto;
+    max-height: calc(100vh - var(--titlebar-height) - 2 * var(--space-5));
+    box-shadow: none;
+  }
+}
+
 /* ── Window widths ─────────────────────────────────────────── */
 
 /* Large monitor: the six shortcuts fit on one line, the project panel sits next to the table. */

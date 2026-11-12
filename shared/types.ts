@@ -364,6 +364,152 @@ export interface Calendar {
   byMonth: MonthPoint[];
 }
 
+// ── Sessions ──────────────────────────────────────────────────────────────────
+
+/** The filters of the Sessions page: the usual ones, plus an optional single day. */
+export interface SessionFilters extends Filters {
+  /**
+   * A local day `YYYY-MM-DD`. When set, it replaces `from` … `to`: the page lists the
+   * sessions with activity that day, as the Calendar counts them, whatever day they started.
+   */
+  day?: string;
+}
+
+/** The columns the sessions table sorts by. */
+export type SessionSortKey =
+  | 'start'
+  | 'machine'
+  | 'project'
+  | 'model'
+  | 'duration'
+  | 'messages'
+  | 'subagents'
+  | 'input'
+  | 'output'
+  | 'cost';
+
+export interface SessionSort {
+  key: SessionSortKey;
+  direction: 'asc' | 'desc';
+}
+
+/** One session, as a row of the sessions table. Token columns include its subagents. */
+export interface SessionRow {
+  id: string;
+  machineId: string;
+  /** The machine's name. */
+  machine: string;
+  /** The project with the most tokens in the session. */
+  project: string;
+  /** The model with the most tokens in the main session. */
+  model: string;
+  /** UTC milliseconds of the main session's first response. */
+  start: number;
+  /** Local day and time of `start`: `YYYY-MM-DD` and `HH:MM`. */
+  startDay: string;
+  startTime: string;
+  /** Active time in milliseconds, subagents included (gaps over 30 minutes left out). */
+  activeMs: number;
+  /** Responses in the main session, deduplicated. */
+  messages: number;
+  /** Subagent invocations, warm-ups left out. */
+  subagents: number;
+  /** Total input: input + cache write + cache read. */
+  input: number;
+  output: number;
+  /** All token types. */
+  tokens: number;
+  /** Estimated cost at API prices. Null when none of its models has a price. */
+  cost: number | null;
+}
+
+export interface SessionsKpis {
+  sessions: number;
+  /** Days on which the listed sessions started; 1 with the day filter. */
+  activeDays: number;
+  /** Null without sessions, as are the other averages and medians. */
+  sessionsPerActiveDay: number | null;
+  averageActiveMs: number | null;
+  medianActiveMs: number | null;
+  averageTokens: number | null;
+  medianTokens: number | null;
+  /** Main-session responses per session. */
+  averageMessages: number | null;
+  /** The session with the most tokens; the most recent one on a tie. */
+  biggest: { id: string; machineId: string; project: string; day: string; tokens: number } | null;
+}
+
+export interface Sessions {
+  /** False when the database holds no usage at all, for the selected machines. */
+  hasData: boolean;
+  kpis: SessionsKpis;
+  /** Sessions per size: <50k, 50–200k, 200–500k, 0.5–1M, ≥1M tokens. */
+  sizeHist: number[];
+  /** Sessions per active time: <10 min, 10–30, 30–60 min, 1–2 h, ≥2 h. */
+  durationHist: number[];
+  /** One page of the table, in the requested order. */
+  rows: SessionRow[];
+  /** Sessions matching the filters, on every page. */
+  total: number;
+  /** The page returned, from 0: the requested one, or the last one when it was past it. */
+  page: number;
+  pageSize: number;
+  /** Projects and models of the period's sessions, for the filter menus (their filters aside). */
+  projects: string[];
+  models: string[];
+}
+
+/** One subagent invocation of a session, for the drawer's timeline. */
+export interface SessionSubagent {
+  agentId: string;
+  type: string;
+  kind: Exclude<AgentKind, 'main'>;
+  model: string;
+  /** UTC milliseconds of the first and last responses. */
+  start: number;
+  end: number;
+  /** Local day and time of `start`. */
+  startDay: string;
+  startTime: string;
+  activeMs: number;
+  /** API calls, deduplicated. */
+  calls: number;
+  /** Total input of the first call: the context loaded before doing anything. */
+  startupInput: number;
+  tokens: number;
+}
+
+export interface SessionDetail {
+  id: string;
+  machineId: string;
+  machine: string;
+  project: string;
+  model: string;
+  /** UTC milliseconds of the main session's first and last responses. */
+  start: number;
+  end: number;
+  startDay: string;
+  startTime: string;
+  /** Active time, subagents included. */
+  activeMs: number;
+  /** First to last response of the main session, pauses included. */
+  spanMs: number;
+  messages: number;
+  /** Invocations, warm-ups left out, as in the table. */
+  subagentCount: number;
+  /** Tokens of the main session and of all its subagents; together, the session's total. */
+  main: TokenBreakdown;
+  subagentTokens: TokenBreakdown;
+  cost: number | null;
+  costIsPartial: boolean;
+  /** Every project the session worked in, largest first. */
+  projects: ShareItem[];
+  /** Every subagent transcript of the session, warm-ups included, oldest first. */
+  subagents: SessionSubagent[];
+  /** The time the timeline spans: the session and all its subagents, UTC milliseconds. */
+  timeline: { from: number; to: number };
+}
+
 /** The API exposed to the renderer as `window.api` by the preload script. */
 export interface Api {
   /** Available synchronously so the title bar can lay out on first paint. */
@@ -376,6 +522,10 @@ export interface Api {
   getModels(filters: Filters): Promise<Models>;
   /** The last 12 months, whatever the period. Follows the machine filter only. */
   getCalendar(machineIds?: string[]): Promise<Calendar>;
+  /** One page of sessions (from 0), with the KPIs and histograms of all of them. */
+  getSessions(filters: SessionFilters, page: number, sort: SessionSort): Promise<Sessions>;
+  /** Null when the session is not in the database. */
+  getSessionDetail(machineId: string, sessionId: string): Promise<SessionDetail | null>;
   /** Subscribes to "usage data changed" events. Returns an unsubscribe function. */
   onUsageUpdated(callback: () => void): () => void;
 }

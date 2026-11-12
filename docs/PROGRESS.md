@@ -11,7 +11,8 @@ Status of the build plan in [SPEC.md](SPEC.md) §8. Read this first when resumin
 | 3. IPC API + Overview          | `380bda0` + follow-up | `getOverview`, KPI cards, daily chart, shortcut cards, cost estimate          |
 | 4. Projects page               | `92776dd`             | `getProjects`, `getProjectDetail`, sortable `DataTable`, analysis panel       |
 | 5. Models page                 | `6e79f86` + follow-up | `getModels`, model cards, weekly share (12 weeks), token types per model      |
-| 6. Calendar page               | (this commit)         | `getCalendar`, 12-month heatmap, streak KPIs, weekday / hour / month charts   |
+| 6. Calendar page               | `43c447e`             | `getCalendar`, 12-month heatmap, streak KPIs, weekday / hour / month charts   |
+| 7. Sessions page               | (this commit)         | `getSessions`, `getSessionDetail`, histograms, paged table, detail drawer     |
 
 CI (lint, typecheck, tests on macOS and Windows) is green up to `e018d16`.
 
@@ -88,11 +89,25 @@ CI (lint, typecheck, tests on macOS and Windows) is green up to `e018d16`.
 - Layout: the three charts sit side by side from 1280 px (weekday, hour, month); below that, weekday and hour share a row and the months take the next one.
 - New reusable pieces: `CategoryBars` (one labeled bar per category, optional highlight), `formatDay(day, { weekday: true })` → `Tue, Nov 10`, `formatMonth`, `en.dates.weekdays` / `weekdaysLong`. `HourBars` takes a `shareLabel`.
 
+**Sessions page**
+
+- `getSessions(filters: SessionFilters, page, sort)` returns `{ hasData, kpis, sizeHist, durationHist, rows, total, page, pageSize, projects, models }`. `getSessionDetail(machineId, sessionId)`: the machine id is added to the SPEC §6 signature because `sessions` is keyed by both. It returns `null` for an unknown session.
+- Day filter: `SessionFilters.day` replaces `from`…`to`. It lists the sessions **with activity that day** (`messages.local_day`, subagents included), the same rule as the heatmap tooltip, so the click shows as many rows as the tooltip said (tested, including a session that runs past midnight). Shown as a removable chip; while it is on, the header's period selector is greyed with the reason. Removing it replaces the history entry. An invalid `?day=` is ignored. Like the heatmap, only this machine has sessions by day until sync.
+- Without a day, a session counts on its start day, so the page's count equals the Overview's Sessions card (tested). Session totals include their subagents and add up to the Overview total when no session crosses the period's edges (tested).
+- Project filter = sessions with activity in the project (`session_projects`, as on Projects). Model filter = the main model (the Model column). The menus list the period's projects and models, their own choice aside. Filters are page state, not in the URL. `agentTypes` and `kinds` do not apply here.
+- Durations are active time everywhere on the page (KPIs, histogram, Duration column, timeline), instead of the spec's "last − first of the main session" for the histogram. The first-to-last span is only in the drawer ("First to last").
+- Messages = main-session responses (`sessions.messages`); subagent calls are not messages. Sessions per active day = sessions / days on which they started (1 with the day filter). Biggest session = most tokens, the latest on a tie. Histogram bins include their lower bound (`50k` is in 50–200k).
+- Cost per session: this machine's sessions are priced model by model from `messages` (1-hour cache writes included), and the sum over a period equals the Overview cost (tested). Other machines' sessions will only have their main model, which then prices all their tokens (see Database below).
+- Sorting and paging run in the main process: every matching session is loaded, priced, sorted in JS (cost needs the pricing), then cut into pages of 25. A page past the end returns the last one. Ties go to the latest start; sessions without a cost go last in both directions. The page resets to the first when the filters or the sort change.
+- Drawer (`src/components/SessionDrawer.tsx`): next to the table from 1600 px (`2fr / minmax(420px, 1fr)`, sticky), over the right side of the page below that. It takes the focus on open; Escape or the close button closes it and puts the focus back. It shows the stats, the main vs subagents split (bar, plus a token-type table), then every subagent transcript, warm-ups included and greyed, so main + subagents = the session total. Its Subagents count leaves warm-ups out, like the table. Timeline bars sit on the span of the session and its subagents; the faint band is the main session.
+- New reusable pieces: controlled sorting in `DataTable` (`sort` + `onSortChange`, `Column.sortable`); `CategoryBars` items take `value` (was `tokens`) with optional `valueLabel` / `formatValue`, for count histograms; `KpiCard title`; `formatDecimal`; `db.localDayTime(ts)` and `LocalClock.toLocalMinute`; CSS `.icon-button`, `.select-field`, `.filter-chip`, `.pager`.
+
 **Database**
 
 - Schema version 4. Versions 2 and 3 empty the `files` table so the transcripts still on disk are read again to fill the new columns. Version 4 adds `session_projects` and rebuilds the derived tables from `messages` (checked on a real version-3 database).
 - Sync (step 10): the `sessions` rows of the sync format carry one project. To keep per-project session counts for other machines, they will also need the list of projects of each session (with tokens), or a `sessionProjects` array.
 - Sync (step 10): the heatmap counts sessions with activity per day from `messages`, which the sync format does not have. The sync files will need per-day session activity (for example the active days of each session) for other machines' heatmap tooltips and the Sessions day filter.
+- Sync (step 10): session costs of other machines need per-model tokens per session (with the 1-hour cache share). Until then they are priced at the session's main model.
 
 ## Open points
 
@@ -101,14 +116,17 @@ CI (lint, typecheck, tests on macOS and Windows) is green up to `e018d16`.
 - Not checked yet: the macOS title bar, and the Windows window buttons, which screenshots do not capture.
 - Prices must be verified before release.
 - File watching is not in yet (step 9): the app scans only at startup.
+- `getSessions` loads every session of the range to sort and page them in JS. Instant on this PC's history (a few dozen sessions); re-check with years of data, `1y` on a heavy user.
 
-## Step 7 starts here: Sessions page
+## Step 8 starts here: Agents page
 
-Spec: SPEC.md §5, Sessions. Suggested effort: `high`.
+Spec: SPEC.md §5, Agents. Suggested effort: `high`.
 
-1. Same path as `getModels` / `getCalendar`: types in `shared/types.ts`, a channel in `shared/ipc.ts`, `preload.ts`, a `handle()` in `electron/main.ts` with an `empty*` fallback. SPEC §6 signatures: `getSessions(f, page, sort)` and `getSessionDetail(sessionId)`.
-2. The day filter comes from the Calendar: read `?day=YYYY-MM-DD` with `SESSIONS_DAY_PARAM` from `src/routes.ts` (`useSearchParams`). Show it as a removable filter chip. It should keep the Calendar's meaning, sessions **with activity that day** (`messages.local_day`), so the count in the heatmap tooltip matches the rows the click opens. Decide how the day filter combines with the header period (the day probably overrides it).
-3. KPIs, size and duration histograms, the paginated sortable table (`DataTable`, `src/lib/sort.ts`) and the detail drawer (main vs subagent tokens, then the timeline of subagent invocations). Durations are active time (see "Numbers" above), the first-to-last span only in the drawer.
-4. Tests in `tests/aggregate.test.ts`: session totals include their subagents and add up to the Overview total; pagination and sort; the day filter, including a session that runs past midnight.
+1. Same path as the other pages: types in `shared/types.ts`, a channel in `shared/ipc.ts`, `preload.ts`, a `handle()` in `electron/main.ts` with an `empty*` fallback. SPEC §6: `getAgents(f)` → `{ kpis, daily, byType, startupByType, top, kinds, modelsMainVsSub }`.
+2. The `subagents` table has one row per invocation with `kind` (warm-ups already derived), `agent_type`, `active_ms`, `startup_input`, `calls` and the token types. Warm-ups are not invocations (see "Reading the logs"); keep them out of the averages, but show them in the Kinds breakdown. Tokens per day come from `hourly` (`kind <> 'main'`), as on the Overview and Projects.
+3. Durations are active time, as on Sessions. Agent type names go through `agentTypeLabel` / `agentKindLabel` (`src/lib/agents.ts`).
+4. Reuse `MainSubagentBars` (main vs subagents per day), `HBars` (startup cost by type), `DataTable` (by type, top 10) and `SplitBar`. A row of the top 10 could open its session in `SessionDrawer` (it takes `machineId` + `sessionId`).
+5. Empty state when there are no subagents yet (SPEC §5 Empty states).
+6. Tests in `tests/aggregate.test.ts`: subagent share and invocations match the Overview shortcut; warm-ups counted apart; the fixture's agent types and kinds.
 
 Run tests from PowerShell: under Git Bash, vitest loads twice (drive letter case) and fails with "failed to find the current suite". Bash heredocs that contain quotes also fail in this shell: write files with the editor tools instead.

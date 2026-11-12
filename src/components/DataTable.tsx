@@ -12,6 +12,8 @@ export interface Column<T> {
   render: (row: T) => ReactNode;
   /** The value the column sorts by. Without it, the column cannot be sorted. */
   sortValue?: (row: T) => SortValue;
+  /** With `onSortChange`: the column can be sorted, by whoever owns the rows. */
+  sortable?: boolean;
   /** Direction of the first click. Default: descending, largest first. */
   firstDirection?: SortDirection;
   /** Numbers are right-aligned. Default: `end`. */
@@ -32,6 +34,12 @@ interface DataTableProps<T> {
   rows: readonly T[];
   rowKey: (row: T) => string;
   initialSort?: SortState;
+  /**
+   * Controlled sorting: the rows come already sorted (by the main process, for a paged
+   * table), `sort` says by what, and a header click calls `onSortChange`.
+   */
+  sort?: SortState | null;
+  onSortChange?: (sort: SortState) => void;
   /** When set, rows can be selected: the first cell holds a button, and a click on the row selects it too. */
   onSelect?: (row: T) => void;
   selectedKey?: string | null;
@@ -46,24 +54,33 @@ export function DataTable<T>({
   rows,
   rowKey,
   initialSort,
+  sort: sortProp,
+  onSortChange,
   onSelect,
   selectedKey,
   emptyText,
 }: DataTableProps<T>) {
-  const [sort, setSort] = useState<SortState | null>(initialSort ?? null);
+  const [localSort, setLocalSort] = useState<SortState | null>(initialSort ?? null);
+  const controlled = onSortChange !== undefined;
+  const sort = controlled ? (sortProp ?? null) : localSort;
 
   const sorted = useMemo(() => {
+    if (controlled) return rows;
     const column = sort && columns.find((candidate) => candidate.id === sort.column);
     if (!sort || !column?.sortValue) return rows;
     return sortRows(rows, column.sortValue, sort.direction);
-  }, [rows, columns, sort]);
+  }, [rows, columns, sort, controlled]);
+
+  const canSort = (column: Column<T>) =>
+    column.sortValue !== undefined || (controlled && column.sortable === true);
 
   const toggle = (column: Column<T>) => {
-    setSort((current) =>
-      current?.column === column.id
-        ? { column: column.id, direction: current.direction === 'asc' ? 'desc' : 'asc' }
-        : { column: column.id, direction: column.firstDirection ?? 'desc' },
-    );
+    const next: SortState =
+      sort?.column === column.id
+        ? { column: column.id, direction: sort.direction === 'asc' ? 'desc' : 'asc' }
+        : { column: column.id, direction: column.firstDirection ?? 'desc' };
+    if (onSortChange) onSortChange(next);
+    else setLocalSort(next);
   };
 
   const alignClass = (column: Column<T>) =>
@@ -89,7 +106,7 @@ export function DataTable<T>({
                   aria-sort={ariaSort}
                   title={column.description}
                 >
-                  {column.sortValue ? (
+                  {canSort(column) ? (
                     <button
                       type="button"
                       className={active ? 'data-table-sort is-active' : 'data-table-sort'}

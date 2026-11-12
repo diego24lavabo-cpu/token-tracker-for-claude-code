@@ -7,5 +7,7 @@ export const IPC = {
   getProjectDetail: 'usage:project-detail',
   getModels: 'usage:models',
   getCalendar: 'usage:calendar',
+  getSessions: 'usage:sessions',
+  getSessionDetail: 'usage:session-detail',
   usageUpdated: 'usage:updated',
 } as const;

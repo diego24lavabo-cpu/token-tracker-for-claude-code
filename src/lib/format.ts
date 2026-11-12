@@ -47,6 +47,15 @@ export function formatInt(value: number): string {
   return integerFormat.format(value);
 }
 
+/** A small average with one decimal, without a trailing `.0`: `1.5`, `12`, `1,204.3`. */
+export function formatDecimal(value: number): string {
+  if (!Number.isFinite(value)) return PLACEHOLDER;
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded)
+    ? integerFormat.format(rounded)
+    : oneDecimalFormat.format(rounded);
+}
+
 /**
  * Compact token count: `950`, `1.5k`, `412k`, `12.4M`, `1.2B`.
  * Millions and billions always keep one decimal; thousands keep one only below 10k.
