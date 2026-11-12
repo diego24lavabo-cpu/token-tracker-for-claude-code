@@ -13,6 +13,7 @@
  */
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
+import { PROJECT_SEPARATOR } from '../shared/projects';
 import type { AgentKind, Machine, Platform, TokenBreakdown } from '../shared/types';
 import { UNKNOWN_AGENT_TYPE, type AgentMeta, type BaseKind } from './subagents';
 import { createLocalClock, systemTimeZone, type LocalClock } from './timezone';
@@ -201,6 +202,14 @@ export const MIGRATIONS: ReadonlyArray<(db: Sqlite) => void> = [
         ON CONFLICT (key) DO UPDATE SET value = '1';
     `);
   },
+  // Subfolders of container folders are now named '<folder> › <subfolder>' instead of
+  // '<subfolder>': the derived tables are rebuilt with the new names.
+  (db) => {
+    db.exec(`
+      INSERT INTO settings (key, value) VALUES ('derived_dirty', '1')
+        ON CONFLICT (key) DO UPDATE SET value = '1';
+    `);
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -278,7 +287,7 @@ function activeTime(partition: string): string {
  */
 const PROJECT_NAME = `
   CASE WHEN subfolder <> '' AND project IN (SELECT value FROM json_each(@containers))
-       THEN subfolder ELSE project END`;
+       THEN project || '${PROJECT_SEPARATOR}' || subfolder ELSE project END`;
 
 /** The columns of 'messages' plus the reported project, for the 'scoped' CTEs below. */
 const SCOPED_COLUMNS = `*, ${PROJECT_NAME} AS project_name`;

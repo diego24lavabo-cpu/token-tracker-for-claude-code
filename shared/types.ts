@@ -159,6 +159,12 @@ export interface ProjectRow {
   mainModel: string;
   /** The last local day with usage, whatever the period, `YYYY-MM-DD`. */
   lastUsed: string;
+  /**
+   * Present on a container folder's row: its subfolders (`<folder> › <subfolder>`) and,
+   * named like the folder, its own top-level usage, largest first. The row's numbers
+   * cover all of them; its sessions count each session once.
+   */
+  children?: ProjectRow[];
 }
 
 export interface ProjectsKpis {
@@ -203,6 +209,8 @@ export interface ProjectAgentType extends ShareItem {
 
 export interface ProjectDetail {
   name: string;
+  /** True for a whole container folder: its subfolders and its own top-level usage. */
+  folder: boolean;
   summary: {
     tokens: number;
     /** Sessions with activity in this project, as in `ProjectRow.sessions`. */
@@ -726,7 +734,8 @@ export interface Api {
   getMachines(): Promise<Machine[]>;
   getOverview(filters: Filters): Promise<Overview>;
   getProjects(filters: Filters): Promise<Projects>;
-  getProjectDetail(project: string, filters: Filters): Promise<ProjectDetail>;
+  /** With `folder`, the whole container folder `project` (every subfolder and its top). */
+  getProjectDetail(project: string, filters: Filters, folder?: boolean): Promise<ProjectDetail>;
   getModels(filters: Filters): Promise<Models>;
   /** The last 12 months, whatever the period. Follows the machine filter only. */
   getCalendar(machineIds?: string[]): Promise<Calendar>;

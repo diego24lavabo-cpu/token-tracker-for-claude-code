@@ -3,7 +3,7 @@
  * as its page, so the numbers match what the app shows. Values are raw: token counts as
  * integers, shares as fractions (0.25 = 25%), costs in US dollars.
  */
-import type { CsvKind, Filters, Pricing } from '../shared/types';
+import type { CsvKind, Filters, Pricing, ProjectRow } from '../shared/types';
 import { getAgents, getDailyExport, getModels, getProjects } from './aggregate';
 import type { UsageDatabase } from './db';
 
@@ -24,6 +24,13 @@ const round = (value: number, digits = 4) => {
   return Math.round(value * factor) / factor;
 };
 const money = (value: number | null) => (value === null ? null : round(value));
+
+/** The projects of the table without the folder rows, largest first. */
+function projectLeaves(rows: readonly ProjectRow[]): ProjectRow[] {
+  return rows
+    .flatMap((row) => row.children ?? [row])
+    .sort((a, b) => b.tokens - a.tokens || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
 
 /** Builds the table of one export. */
 export function buildCsvTable(
@@ -75,7 +82,8 @@ export function buildCsvTable(
           'main_model',
           'last_used',
         ],
-        rows: getProjects(db, filters).rows.map((row) => [
+        // One line per project: a container folder's subfolders as `VS Code › name`.
+        rows: projectLeaves(getProjects(db, filters).rows).map((row) => [
           row.name,
           row.tokens,
           round(row.share),

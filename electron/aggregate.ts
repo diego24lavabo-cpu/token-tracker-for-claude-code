@@ -45,6 +45,7 @@ import type {
   SubagentKind,
   TokenBreakdown,
 } from '../shared/types';
+import { containerOf, PROJECT_SEPARATOR } from '../shared/projects';
 import type { UsageDatabase } from './db';
 import { costOf } from './pricing';
 
@@ -510,36 +511,48 @@ interface ProjectTotals {
   active_days: number;
 }
 
+/** A project column grouped by project, the usual way. */
+const BY_PROJECT = 'project';
+/**
+ * A project column grouped by container folder: `VS Code › Astrophotography_TM` and
+ * `VS Code` both count under `VS Code`; any other project stays itself.
+ */
+const BY_FOLDER = `CASE WHEN instr(project, '${PROJECT_SEPARATOR}') > 1
+  THEN substr(project, 1, instr(project, '${PROJECT_SEPARATOR}') - 1) ELSE project END`;
+
 /**
  * Sessions with activity in a project, counted on their start day like every session
- * count. A session that worked in two projects counts in both.
+ * count. A session that worked in two projects counts in both, but once per folder when
+ * grouped by folder.
  */
 function sessionsPerProject(
   db: UsageDatabase,
   filters: Filters,
+  key: string = BY_PROJECT,
 ): Map<string, { count: number; tokens: number }> {
   const started = startDayWhere(filters);
   const rows = db.raw
     .prepare(
-      `SELECT project, COUNT(*) AS count, SUM(tokens) AS tokens
-       FROM session_projects WHERE ${started.sql} GROUP BY project`,
+      `SELECT ${key} AS grp, COUNT(DISTINCT machine_id || '/' || session_id) AS count,
+              SUM(tokens) AS tokens
+       FROM session_projects WHERE ${started.sql} GROUP BY grp`,
     )
-    .all(...started.params) as { project: string; count: number; tokens: number }[];
-  return new Map(rows.map((row) => [row.project, row]));
+    .all(...started.params) as { grp: string; count: number; tokens: number }[];
+  return new Map(rows.map((row) => [row.grp, row]));
 }
 
-/** The Projects page: KPI row and the table of every project used in the period. */
-export function getProjects(db: UsageDatabase, filters: Filters): Projects {
+/** One table row per value of `key` (a project, or a container folder), largest first. */
+function projectRows(db: UsageDatabase, filters: Filters, key: string): ProjectRow[] {
   const where = hourlyWhere(filters);
   const raw = db.raw;
 
   const totals = raw
     .prepare(
-      `SELECT project AS name, SUM(${TOKENS}) AS tokens, SUM(${INPUT_TOKENS}) AS input,
+      `SELECT ${key} AS name, SUM(${TOKENS}) AS tokens, SUM(${INPUT_TOKENS}) AS input,
               SUM(output) AS output,
               SUM(CASE WHEN kind <> 'main' THEN ${TOKENS} ELSE 0 END) AS subagent,
               COUNT(DISTINCT CASE WHEN ${TOKENS} > 0 THEN local_day END) AS active_days
-       FROM hourly WHERE ${where.sql} GROUP BY project HAVING tokens > 0`,
+       FROM hourly WHERE ${where.sql} GROUP BY 1 HAVING tokens > 0`,
     )
     .all(...where.params) as ProjectTotals[];
   totals.sort(byTokens);
@@ -550,42 +563,30 @@ export function getProjects(db: UsageDatabase, filters: Filters): Projects {
     (
       raw
         .prepare(
-          `SELECT project, MAX(local_day) AS day FROM hourly
-           WHERE ${anyDay.sql} AND ${TOKENS} > 0 GROUP BY project`,
+          `SELECT ${key} AS grp, MAX(local_day) AS day FROM hourly
+           WHERE ${anyDay.sql} AND ${TOKENS} > 0 GROUP BY 1`,
         )
-        .all(...anyDay.params) as { project: string; day: string }[]
-    ).map((row) => [row.project, row.day]),
+        .all(...anyDay.params) as { grp: string; day: string }[]
+    ).map((row) => [row.grp, row.day]),
   );
 
   const modelsByProject = new Map<string, { name: string; tokens: number }[]>();
   const modelRows = raw
     .prepare(
-      `SELECT project, model AS name, SUM(${TOKENS}) AS tokens
-       FROM hourly WHERE ${where.sql} GROUP BY project, model HAVING tokens > 0`,
+      `SELECT ${key} AS grp, model AS name, SUM(${TOKENS}) AS tokens
+       FROM hourly WHERE ${where.sql} GROUP BY 1, model HAVING tokens > 0`,
     )
-    .all(...where.params) as { project: string; name: string; tokens: number }[];
+    .all(...where.params) as { grp: string; name: string; tokens: number }[];
   for (const row of modelRows) {
-    const list = modelsByProject.get(row.project) ?? [];
+    const list = modelsByProject.get(row.grp) ?? [];
     list.push(row);
-    modelsByProject.set(row.project, list);
+    modelsByProject.set(row.grp, list);
   }
 
-  const sessionsByProject = sessionsPerProject(db, filters);
-  // The KPI counts each session once.
-  const started = startDayWhere(filters);
-  const allSessions = raw
-    .prepare(
-      `SELECT COUNT(*) AS count, COALESCE(SUM(${TOKENS}), 0) AS tokens
-       FROM sessions WHERE ${started.sql}`,
-    )
-    .get(...started.params) as { count: number; tokens: number };
-
+  const sessionsByProject = sessionsPerProject(db, filters, key);
   const totalTokens = totals.reduce((sum, row) => sum + row.tokens, 0);
-  const totalInput = totals.reduce((sum, row) => sum + row.input, 0);
-  const totalOutput = totals.reduce((sum, row) => sum + row.output, 0);
-  const top3Tokens = totals.slice(0, 3).reduce((sum, row) => sum + row.tokens, 0);
 
-  const rows: ProjectRow[] = totals.map((row) => {
+  return totals.map((row) => {
     const sessions = sessionsByProject.get(row.name);
     return {
       name: row.name,
@@ -602,12 +603,58 @@ export function getProjects(db: UsageDatabase, filters: Filters): Projects {
       lastUsed: lastUsed.get(row.name) ?? '',
     };
   });
+}
 
-  const main = rows[0];
+/**
+ * The Projects page: KPI row and the table of every project used in the period. The
+ * subfolders of a container folder are nested under one row for the whole folder, with
+ * the folder's own top-level usage as one more child. The KPIs count projects, not folders.
+ */
+export function getProjects(db: UsageDatabase, filters: Filters): Projects {
+  const leaves = projectRows(db, filters, BY_PROJECT);
+
+  const children = new Map<string, ProjectRow[]>();
+  for (const leaf of leaves) {
+    const folder = containerOf(leaf.name);
+    if (folder === null) continue;
+    const list = children.get(folder) ?? [];
+    list.push(leaf);
+    children.set(folder, list);
+  }
+  for (const leaf of leaves) {
+    if (containerOf(leaf.name) === null) children.get(leaf.name)?.push(leaf);
+  }
+
+  let rows = leaves;
+  if (children.size > 0) {
+    const byName = new Map(leaves.map((leaf) => [leaf.name, leaf]));
+    rows = projectRows(db, filters, BY_FOLDER).map((folder) => {
+      const list = children.get(folder.name);
+      return list
+        ? { ...folder, children: list.sort(byTokens) }
+        : (byName.get(folder.name) ?? folder);
+    });
+  }
+
+  // The KPI counts each session once.
+  const started = startDayWhere(filters);
+  const allSessions = db.raw
+    .prepare(
+      `SELECT COUNT(*) AS count, COALESCE(SUM(${TOKENS}), 0) AS tokens
+       FROM sessions WHERE ${started.sql}`,
+    )
+    .get(...started.params) as { count: number; tokens: number };
+
+  const totalTokens = leaves.reduce((sum, row) => sum + row.tokens, 0);
+  const totalInput = leaves.reduce((sum, row) => sum + row.input, 0);
+  const totalOutput = leaves.reduce((sum, row) => sum + row.output, 0);
+  const top3Tokens = leaves.slice(0, 3).reduce((sum, row) => sum + row.tokens, 0);
+
+  const main = leaves[0];
   return {
     hasData: hasAnyUsage(db, filters.machineIds),
     kpis: {
-      activeProjects: rows.length,
+      activeProjects: leaves.length,
       mainProject: main ? { name: main.name, share: main.share } : null,
       tokensPerSession: allSessions.count > 0 ? allSessions.tokens / allSessions.count : null,
       outputInputRatio: ratio(totalOutput, totalInput),
@@ -615,6 +662,14 @@ export function getProjects(db: UsageDatabase, filters: Filters): Projects {
     },
     rows,
   };
+}
+
+/** Every project of a container folder: its subfolders and the folder itself. */
+function folderMembers(db: UsageDatabase, folder: string): string[] {
+  return db.raw
+    .prepare(`SELECT DISTINCT project FROM hourly WHERE ${BY_FOLDER} = ?`)
+    .pluck()
+    .all(folder) as string[];
 }
 
 /** What the Projects page shows when there is no database to read. */
@@ -638,8 +693,10 @@ export function getProjectDetail(
   pricing: Pricing,
   project: string,
   filters: Filters,
+  folder = false,
 ): ProjectDetail {
-  const scoped: Filters = { ...filters, projects: [project] };
+  const members = folder ? folderMembers(db, project) : [];
+  const scoped: Filters = { ...filters, projects: members.length > 0 ? members : [project] };
   const where = hourlyWhere(scoped);
   const raw = db.raw;
 
@@ -711,11 +768,13 @@ export function getProjectDetail(
     if (row.hour >= 0 && row.hour < 24) hours[row.hour] = row.tokens;
   }
 
-  // Like the table: every session with activity in the project.
-  const sessions = sessionsPerProject(db, scoped).get(project)?.count ?? 0;
+  // Like the table: every session with activity in the project (once per folder).
+  const sessions =
+    sessionsPerProject(db, scoped, folder ? BY_FOLDER : BY_PROJECT).get(project)?.count ?? 0;
 
   return {
     name: project,
+    folder,
     summary: {
       tokens,
       sessions,
@@ -736,9 +795,14 @@ export function getProjectDetail(
 }
 
 /** What the analysis panel shows when there is no database to read. */
-export function emptyProjectDetail(project: string, filters: Filters): ProjectDetail {
+export function emptyProjectDetail(
+  project: string,
+  filters: Filters,
+  folder = false,
+): ProjectDetail {
   return {
     name: project,
+    folder,
     summary: {
       tokens: 0,
       sessions: 0,

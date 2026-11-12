@@ -590,12 +590,13 @@ function registerIpc(): void {
     return database ? getProjects(database, filters) : emptyProjects();
   });
 
-  handle<ProjectDetail>(IPC.getProjectDetail, (_event, projectInput, filtersInput) => {
+  handle<ProjectDetail>(IPC.getProjectDetail, (_event, projectInput, filtersInput, folderInput) => {
     const project = parseProjectName(projectInput);
     const filters = parseFilters(filtersInput);
+    const folder = folderInput === true;
     return database
-      ? getProjectDetail(database, pricing, project, filters)
-      : emptyProjectDetail(project, filters);
+      ? getProjectDetail(database, pricing, project, filters, folder)
+      : emptyProjectDetail(project, filters, folder);
   });
 
   handle<Models>(IPC.getModels, (_event, input) => {

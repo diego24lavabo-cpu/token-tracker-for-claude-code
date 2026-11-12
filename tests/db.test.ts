@@ -453,15 +453,20 @@ describe('derived tables', () => {
     db.setContainerProjects(['workspace', ' workspace ', '']);
     expect(db.getContainerProjects()).toEqual(['workspace']);
     // Responses made at the top of the folder keep its name; other folders are untouched.
-    expect(projects()).toEqual({ alpha: 3 * 115, beta: 115, workspace: 115, other: 115 });
+    expect(projects()).toEqual({
+      'workspace › alpha': 3 * 115,
+      'workspace › beta': 115,
+      workspace: 115,
+      other: 115,
+    });
     expect(
       db.raw.prepare('SELECT session_id, project FROM sessions ORDER BY session_id').all(),
     ).toEqual([
-      { session_id: 's1', project: 'alpha' },
-      { session_id: 's2', project: 'beta' },
+      { session_id: 's1', project: 'workspace › alpha' },
+      { session_id: 's2', project: 'workspace › beta' },
       { session_id: 's3', project: 'other' },
     ]);
-    expect(db.listSubagents()[0]?.project).toBe('alpha');
+    expect(db.listSubagents()[0]?.project).toBe('workspace › alpha');
     expect(db.stats().projects).toBe(4);
     // Raw history is unchanged, so the flag can be removed again.
     expect(
@@ -473,7 +478,7 @@ describe('derived tables', () => {
     store(db, [
       message({ dedupKey: 'g', sessionId: 's4', project: 'workspace', subfolder: 'gamma' }),
     ]);
-    expect(projects().gamma).toBe(115);
+    expect(projects()['workspace › gamma']).toBe(115);
 
     db.setContainerProjects([]);
     expect(projects()).toEqual({ workspace: 6 * 115, other: 115 });
@@ -486,7 +491,7 @@ describe('derived tables', () => {
     db.setSetting('container_projects', '["a", 3, null, ""]');
     expect(db.getContainerProjects()).toEqual(['a']);
     store(db, [message({ dedupKey: 'a', project: 'a', subfolder: 'b' })]);
-    expect(tokensBy(db, 'hourly', 'project')).toEqual({ b: 115 });
+    expect(tokensBy(db, 'hourly', 'project')).toEqual({ 'a › b': 115 });
   });
 
   it('records the subfolder a response was made in, also when a later copy brings it', () => {

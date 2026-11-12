@@ -754,6 +754,53 @@ button {
   text-align: center;
 }
 
+/* First cell with a toggle in front of the row's select button. */
+.data-table-lead {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.data-table-lead .data-table-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.row-toggle,
+.row-toggle-space {
+  display: inline-grid;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+}
+
+.row-toggle {
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-muted);
+  font-family: system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.row-toggle:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.data-table tr.is-child .data-table-lead {
+  padding-left: 22px;
+}
+
+.data-table tr.is-folder .cell-name {
+  font-weight: 600;
+}
+
 .cell-name {
   display: block;
   max-width: 190px;

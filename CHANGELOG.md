@@ -19,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Overview page: total, input and output tokens, estimated cost, tokens per day, and shortcut cards to every section, filtered by machine and period.
 - Cost estimate at API prices from an editable `pricing.json`, with 1-hour cache writes priced separately.
 - Active time for sessions and subagent runs: pauses longer than 30 minutes are left out.
-- Container folders: a folder flagged as holding several projects is split by the directory directly under it.
+- Container folders: a folder flagged as holding several projects is split by the directory directly under it, shown as `VS Code › Astrophotography_TM`. On the Projects page its subfolders are grouped under an expandable row for the whole folder.
 - The period comparison shows "New activity" when the period before had less than 5% of the usage.
 - Projects, Models, Calendar, Sessions and Agents pages.
 - Settings page: data sources with an "Add folder" picker, scan statistics and a "lines skipped" badge, the container folder switches, the price editor, launch at login, "Rebuild database" and About.

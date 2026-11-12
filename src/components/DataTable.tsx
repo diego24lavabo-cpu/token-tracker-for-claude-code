@@ -45,6 +45,10 @@ interface DataTableProps<T> {
   selectedKey?: string | null;
   /** Shown in place of the rows when there are none. */
   emptyText: string;
+  /** Content before the first cell's own content, outside its select button (a toggle). */
+  rowPrefix?: (row: T) => ReactNode;
+  /** Extra class on a row. */
+  rowClassName?: (row: T) => string | undefined;
 }
 
 /** A table whose columns sort with a click on their header. */
@@ -59,6 +63,8 @@ export function DataTable<T>({
   onSelect,
   selectedKey,
   emptyText,
+  rowPrefix,
+  rowClassName,
 }: DataTableProps<T>) {
   const [localSort, setLocalSort] = useState<SortState | null>(initialSort ?? null);
   const controlled = onSortChange !== undefined;
@@ -144,14 +150,18 @@ export function DataTable<T>({
               return (
                 <tr
                   key={key}
-                  className={[onSelect && 'is-selectable', selected && 'is-selected']
+                  className={[
+                    onSelect && 'is-selectable',
+                    selected && 'is-selected',
+                    rowClassName?.(row),
+                  ]
                     .filter(Boolean)
                     .join(' ')}
                   onClick={onSelect ? () => onSelect(row) : undefined}
                 >
-                  {columns.map((column, index) => (
-                    <td key={column.id} className={alignClass(column)}>
-                      {index === 0 && onSelect ? (
+                  {columns.map((column, index) => {
+                    const content =
+                      index === 0 && onSelect ? (
                         <button
                           type="button"
                           className="data-table-select"
@@ -165,9 +175,20 @@ export function DataTable<T>({
                         </button>
                       ) : (
                         column.render(row)
-                      )}
-                    </td>
-                  ))}
+                      );
+                    return (
+                      <td key={column.id} className={alignClass(column)}>
+                        {index === 0 && rowPrefix ? (
+                          <div className="data-table-lead">
+                            {rowPrefix(row)}
+                            {content}
+                          </div>
+                        ) : (
+                          content
+                        )}
+                      </td>
+                    );
+                  })}
                 </tr>
               );
             })

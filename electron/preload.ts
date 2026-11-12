@@ -13,8 +13,8 @@ const api: Api = {
   getMachines: () => ipcRenderer.invoke(IPC.getMachines),
   getOverview: (filters) => ipcRenderer.invoke(IPC.getOverview, filters),
   getProjects: (filters) => ipcRenderer.invoke(IPC.getProjects, filters),
-  getProjectDetail: (project, filters) =>
-    ipcRenderer.invoke(IPC.getProjectDetail, project, filters),
+  getProjectDetail: (project, filters, folder) =>
+    ipcRenderer.invoke(IPC.getProjectDetail, project, filters, folder === true),
   getModels: (filters) => ipcRenderer.invoke(IPC.getModels, filters),
   getCalendar: (machineIds) => ipcRenderer.invoke(IPC.getCalendar, machineIds),
   getSessions: (filters, page, sort) => ipcRenderer.invoke(IPC.getSessions, filters, page, sort),

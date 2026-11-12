@@ -14,7 +14,8 @@ Status of the build plan in [SPEC.md](SPEC.md) §8. Read this first when resumin
 | 6. Calendar page               | `43c447e`             | `getCalendar`, 12-month heatmap, streak KPIs, weekday / hour / month charts   |
 | 7. Sessions page               | `c3dff4b`             | `getSessions`, `getSessionDetail`, histograms, paged table, detail drawer     |
 | 8. Agents page                 | `d002f1d`             | `getAgents`, KPIs, daily main vs subagents, by type, startup, kinds, top 10   |
-| 9. Settings, CSV, watching     | (this commit)         | Settings page, container switches, price editor, chokidar, CSV, rebuild       |
+| 9. Settings, CSV, watching     | `7f1b298`             | Settings page, container switches, price editor, chokidar, CSV, rebuild       |
+| 9b. Container folder groups    | (this commit)         | `<folder> › <subfolder>` names, expandable folder rows on Projects            |
 
 CI (lint, typecheck, tests on macOS and Windows) is green up to `e018d16`.
 
@@ -39,7 +40,7 @@ CI (lint, typecheck, tests on macOS and Windows) is green up to `e018d16`.
 **Reading the logs**
 
 - Project = the directory a session folder stands for, recovered by walking `cwd` up until its encoding matches the folder name. `basename(cwd)` is only the fallback for a `cwd` outside that tree. Reason: `cd` into subfolders would otherwise split projects. The first-level subfolder is stored per response (`messages.subfolder`).
-- Container folders: a folder project listed in the `container_projects` setting is reported under its first-level subfolders. Responses at the top of the folder keep its name. This is applied when the derived tables are built, so `messages` keeps the raw names and the flags can change without losing history.
+- Container folders: a folder project listed in the `container_projects` setting is reported under its first-level subfolders, named **`<folder> › <subfolder>`** (for example `VS Code › Astrophotography_TM`; `PROJECT_SEPARATOR` and `containerOf` / `subfolderOf` in `shared/projects.ts`). Responses at the top of the folder keep the folder's name. This is applied when the derived tables are built, so `messages` keeps the raw names and the flags can change without losing history. Because the full name is the project name in every derived table, every page, filter and export shows it as is (Overview main project, Sessions table and project filter, Agents top 10, CSV); only the Projects table shortens it under its folder.
 - Duplicated responses: the key is `message.id:requestId`, global. The largest token values and the first stop reason win. When copies sit in different places, the owning main session beats copied history, which beats a subagent, which beats a `/btw` transcript. Files are read main sessions first, then oldest first.
 - "Lines skipped" counts only unreadable lines (broken JSON, malformed assistant records), not the many lines without usage.
 - Warm-up agent: a task or workflow agent with at most 1 output token in total and no stop reason. Warm-ups are not counted as invocations; `/btw` side questions are.
@@ -64,6 +65,8 @@ CI (lint, typecheck, tests on macOS and Windows) is green up to `e018d16`.
 - "Last used" is the last day with usage of the project, whatever the selected period (the machine and other filters still apply). Out/In = output / total input; the panel's "output %" = output / all tokens.
 - Agent types in the panel are grouped by type and kind, so a warm-up never mixes with real invocations. `aside_question` shows as `/btw`, `unknown` as "Unknown type" (`src/lib/agents.ts`, ids in `shared/agents.ts`).
 - Layout: the panel sits next to the table from 1600 px (`2fr / minmax(460px, 1fr)`). Inside, the panel lays itself out with container queries (1, 2 or 3-zone grid), whatever its position.
+- **Container folder groups** (after step 9): a project named `<folder> › <subfolder>` is nested in `ProjectRow.children` of one row for the folder; the folder's own top-level usage (the project named like the folder) is one more child, labeled `<folder> (root)`. Grouping goes by the separator in the name, not by this machine's flags, so it will also work for synced names. The folder row is computed in SQL by folder (`BY_FOLDER` in `aggregate.ts`), not summed in JS: tokens, input, output and shares equal the sum of the children (tested), but sessions count a session once per folder (a session working in two subfolders counts in both children and once in the folder), and active days, main model and last used are the folder's own. The KPIs still count projects (the leaves), so "Active projects" includes each subfolder.
+- Table: folders are collapsed by default, with a ▸/▾ button in front of the select button of the first cell (`DataTable rowPrefix`, `rowClassName`); children are indented. Sorting is controlled by the page: top-level rows sort by the chosen column, children within their folder by the same column. Search matches the label (subfolder name, or `<folder> (root)`); a match inside a folder opens it and shows only the matching children, a match on the folder name shows the folder as the user left it. Clicking the folder row shows the whole folder's analysis (`getProjectDetail(project, filters, folder = true)`, `ProjectDetail.folder`, the panel title says "whole folder"); clicking a child shows only that project. The projects CSV lists the leaves (full names), largest first.
 - Reusable pieces for later steps: `DataTable` (sort on header click, `aria-sort`, nulls last, optional row selection through a button in the first cell), `src/lib/sort.ts`, `MainSubagentBars` (Agents page), `HourBars` (Calendar), `HBars`, `SplitBar` (Machines), `ChartTooltip`, `formatRelativeDay`.
 
 **Models page**
@@ -137,7 +140,7 @@ CI (lint, typecheck, tests on macOS and Windows) is green up to `e018d16`.
 
 **Database**
 
-- Schema version 4. Versions 2 and 3 empty the `files` table so the transcripts still on disk are read again to fill the new columns. Version 4 adds `session_projects` and rebuilds the derived tables from `messages` (checked on a real version-3 database).
+- Schema version 5. Versions 2 and 3 empty the `files` table so the transcripts still on disk are read again to fill the new columns. Version 4 adds `session_projects` and rebuilds the derived tables from `messages` (checked on a real version-3 database). Version 5 only rebuilds the derived tables, for the `<folder> › <subfolder>` names (checked on a version-4 database with a flagged folder).
 
 ## Open points
 
@@ -154,7 +157,7 @@ CI (lint, typecheck, tests on macOS and Windows) is green up to `e018d16`.
 - **Required: the sync format must carry per-model tokens for each session** (the four token types plus the 1-hour cache-write share, per model), so the costs of other machines' sessions are exact. Today a session of another machine only has its main model, which prices all its tokens (`sessionCosts` in `aggregate.ts`). The same applies to subagent runs (`subagentRuns[].tokens` per model), used by the Agents page's per-type costs (`agentTypeModels`).
 - The `sessions` rows carry one project. To keep per-project session counts for other machines, they also need the projects of each session with their tokens (or a `sessionProjects` array).
 - The heatmap counts sessions with activity per day from `messages`, which the sync format does not have. The sync files need per-day session activity (for example the active days of each session) for other machines' heatmap tooltips and the Sessions day filter.
-- Container folders are applied when the derived tables are built, so the synced aggregates carry the **source machine's** split. Decide whether a machine's flags should also apply to other machines' project names (a folder named `VS Code` on both), or leave it to the project aliases of SPEC §5b.
+- Container folders are applied when the derived tables are built, so the synced aggregates carry the **source machine's** split, as `<folder> › <subfolder>` names; the Projects page groups them by that name whatever machine they come from. Decide whether a machine's flags should also apply to other machines' unsplit names (a folder named `VS Code` flagged on one machine only), or leave it to the project aliases of SPEC §5b.
 - Sync should export after a scan that changed something (SPEC §5b: 60 s debounce, at most every 5 min): hook it on the task chain in `main.ts` after `scanLogs`, and put its own card where the Sync placeholder is.
 
 ## Step 10 starts here: Google Drive sync + Machines page

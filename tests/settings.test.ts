@@ -266,11 +266,13 @@ describe('settings', () => {
       ['gone', true],
     ]);
     expect(candidates[1]).toMatchObject({ tokens: 0, subfolderCount: 0, subfolderShare: 0 });
-    expect(
-      getProjects(db, BOTH_DAYS)
-        .rows.map((row) => row.name)
-        .sort(),
-    ).toEqual(['alpha', 'beta', 'demo-app', 'flat']);
+    const rows = getProjects(db, BOTH_DAYS).rows;
+    expect(rows.map((row) => row.name)).toEqual(['flat', 'demo-app']);
+    expect(rows[1]?.children?.map((child) => child.name)).toEqual([
+      'demo-app › alpha',
+      'demo-app › beta',
+      'demo-app',
+    ]);
     expect(getUsedModels(db)).toEqual([{ name: 'Opus 5.5', tokens: 100 + 115 }]);
   });
 

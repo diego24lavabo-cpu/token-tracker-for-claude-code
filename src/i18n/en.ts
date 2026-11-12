@@ -165,9 +165,15 @@ export const en = {
       activeDays: 'Active days',
       mainModel: 'Main model',
       lastUsed: 'Last used',
+      /** The top-level usage of a container folder, as a row under the folder. */
+      root: (folder: string) => `${folder} (root)`,
+      expand: (folder: string) => `Show the subfolders of ${folder}`,
+      collapse: (folder: string) => `Hide the subfolders of ${folder}`,
+      subfolders: (count: number) => (count === 1 ? '1 subfolder' : `${count} subfolders`),
     },
     panel: {
       title: 'Analysis',
+      wholeFolder: 'whole folder',
       label: (project: string) => `Analysis of ${project}`,
       summary: {
         tokens: (value: string) => `${value} tokens`,

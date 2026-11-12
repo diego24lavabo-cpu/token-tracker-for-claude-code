@@ -6,7 +6,8 @@ import type {
   ProjectRow,
   Projects as ProjectsData,
 } from '../../shared/types';
-import { DataTable, type Column } from '../components/DataTable';
+import { subfolderOf } from '../../shared/projects';
+import { DataTable, type Column, type SortState } from '../components/DataTable';
 import { EmptyState } from '../components/EmptyState';
 import { HBars } from '../components/HBars';
 import { HourBars } from '../components/HourBars';
@@ -26,6 +27,7 @@ import {
   formatRelativeDay,
   formatTokens,
 } from '../lib/format';
+import { sortRows } from '../lib/sort';
 import { useAppData } from '../state/appData';
 
 const NO_VALUE = '—';
@@ -36,7 +38,7 @@ export function Projects() {
   const { info } = useAppData();
   const fetchProjects = useCallback(() => window.api.getProjects(filters), [filters]);
   const { data } = useUsageQuery(fetchProjects);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Selection | null>(null);
 
   if (data && !data.hasData) {
     return (
@@ -53,8 +55,14 @@ export function Projects() {
   }
 
   const rows = data?.rows ?? [];
-  // The selection survives a change of period while the project is still in the table.
-  const current = rows.some((row) => row.name === selected) ? selected : (rows[0]?.name ?? null);
+  // The selection survives a change of period while it is still in the table.
+  const first = rows[0];
+  const current =
+    selected && isSelectable(rows, selected)
+      ? selected
+      : first
+        ? { project: first.name, folder: first.children !== undefined }
+        : null;
 
   return (
     <Page section="projects">
@@ -64,12 +72,62 @@ export function Projects() {
           rows={rows}
           loaded={data !== null}
           selected={current}
-          onSelect={(row) => setSelected(row.name)}
+          onSelect={setSelected}
         />
-        {current !== null && <ProjectPanel project={current} filters={filters} />}
+        {current !== null && (
+          <ProjectPanel
+            selection={current}
+            label={selectionLabel(current, rows)}
+            filters={filters}
+          />
+        )}
       </div>
     </Page>
   );
+}
+
+/** A row of the table: a whole container folder, or one project. */
+interface Selection {
+  project: string;
+  folder: boolean;
+}
+
+const selectionKey = (selection: Selection) =>
+  `${selection.folder ? 'folder' : 'project'}:${selection.project}`;
+
+function isSelectable(rows: readonly ProjectRow[], selection: Selection): boolean {
+  return rows.some((row) =>
+    selection.folder
+      ? row.children !== undefined && row.name === selection.project
+      : row.children
+        ? row.children.some((child) => child.name === selection.project)
+        : row.name === selection.project,
+  );
+}
+
+/** The name shown for a project: a folder's own top-level usage is "<folder> (root)". */
+function selectionLabel(selection: Selection, rows?: readonly ProjectRow[]): string {
+  if (selection.folder) return selection.project;
+  const isRoot = rows?.some((row) => row.children !== undefined && row.name === selection.project);
+  return isRoot ? t.table.root(selection.project) : selection.project;
+}
+
+/** One line of the table, top level or nested under a container folder. */
+interface TableLine {
+  key: string;
+  row: ProjectRow;
+  /** Set on a subfolder line: the folder it belongs to. */
+  parent: ProjectRow | null;
+  /** What the first column shows. */
+  label: string;
+  selection: Selection;
+}
+
+function lineOf(row: ProjectRow, parent: ProjectRow | null): TableLine {
+  const selection = { project: row.name, folder: parent === null && row.children !== undefined };
+  let label = row.name;
+  if (parent) label = row.name === parent.name ? t.table.root(row.name) : subfolderOf(row.name);
+  return { key: selectionKey(selection), row, parent, label, selection };
 }
 
 function KpiRow({ data }: { data: ProjectsData | null }) {
@@ -111,21 +169,21 @@ function KpiRow({ data }: { data: ProjectsData | null }) {
 interface ProjectsTableProps {
   rows: ProjectRow[];
   loaded: boolean;
-  selected: string | null;
-  onSelect: (row: ProjectRow) => void;
+  selected: Selection | null;
+  onSelect: (selection: Selection) => void;
 }
+
+const INITIAL_SORT: SortState = { column: 'tokens', direction: 'desc' };
 
 function ProjectsTable({ rows, loaded, selected, onSelect }: ProjectsTableProps) {
   const today = useToday();
   const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<SortState>(INITIAL_SORT);
+  // Container folders whose subfolders are shown. Collapsed by default.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const c = t.table;
 
-  const visible = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return needle ? rows.filter((row) => row.name.toLowerCase().includes(needle)) : rows;
-  }, [rows, query]);
-
-  const columns = useMemo((): Column<ProjectRow>[] => {
+  const columns = useMemo((): Column<TableLine>[] => {
     const largest = rows.reduce((max, row) => Math.max(max, row.tokens), 0);
     return [
       {
@@ -134,10 +192,13 @@ function ProjectsTable({ rows, loaded, selected, onSelect }: ProjectsTableProps)
         align: 'start',
         className: 'col-name',
         firstDirection: 'asc',
-        sortValue: (row) => row.name,
-        render: (row) => (
-          <span className="cell-name num" title={row.name}>
-            {row.name}
+        sortValue: (line) => line.label,
+        render: (line) => (
+          <span className="cell-name num" title={line.row.name}>
+            {line.label}
+            {line.row.children && (
+              <span className="cell-muted"> · {c.subfolders(countSubfolders(line.row))}</span>
+            )}
           </span>
         ),
       },
@@ -145,8 +206,8 @@ function ProjectsTable({ rows, loaded, selected, onSelect }: ProjectsTableProps)
         id: 'tokens',
         header: c.tokens,
         align: 'start',
-        sortValue: (row) => row.tokens,
-        render: (row) => (
+        sortValue: (line) => line.row.tokens,
+        render: ({ row }) => (
           <span className="cell-share" title={formatPercent(row.share)}>
             <span className="cell-share-track" aria-hidden="true">
               <span
@@ -161,28 +222,28 @@ function ProjectsTable({ rows, loaded, selected, onSelect }: ProjectsTableProps)
       {
         id: 'input',
         header: c.input,
-        sortValue: (row) => row.input,
-        render: (row) => <span className="num">{formatTokens(row.input)}</span>,
+        sortValue: ({ row }) => row.input,
+        render: ({ row }) => <span className="num">{formatTokens(row.input)}</span>,
       },
       {
         id: 'output',
         header: c.output,
-        sortValue: (row) => row.output,
-        render: (row) => <span className="num">{formatTokens(row.output)}</span>,
+        sortValue: ({ row }) => row.output,
+        render: ({ row }) => <span className="num">{formatTokens(row.output)}</span>,
       },
       {
         id: 'outIn',
         header: c.outIn,
-        sortValue: (row) => row.outputInputRatio,
-        render: (row) => (
+        sortValue: ({ row }) => row.outputInputRatio,
+        render: ({ row }) => (
           <span className="num">{formatPercent(row.outputInputRatio, { precise: true })}</span>
         ),
       },
       {
         id: 'subagents',
         header: c.subagents,
-        sortValue: (row) => row.subagentShare,
-        render: (row) => (
+        sortValue: ({ row }) => row.subagentShare,
+        render: ({ row }) => (
           <span className="num cell-accent">{formatPercent(row.subagentShare)}</span>
         ),
       },
@@ -190,14 +251,14 @@ function ProjectsTable({ rows, loaded, selected, onSelect }: ProjectsTableProps)
         id: 'sessions',
         header: c.sessions,
         description: c.sessionsHint,
-        sortValue: (row) => row.sessions,
-        render: (row) => <span className="num">{formatInt(row.sessions)}</span>,
+        sortValue: ({ row }) => row.sessions,
+        render: ({ row }) => <span className="num">{formatInt(row.sessions)}</span>,
       },
       {
         id: 'perSession',
         header: c.perSession,
-        sortValue: (row) => row.tokensPerSession,
-        render: (row) => (
+        sortValue: ({ row }) => row.tokensPerSession,
+        render: ({ row }) => (
           <span className="num">
             {row.tokensPerSession === null ? NO_VALUE : formatTokens(row.tokensPerSession)}
           </span>
@@ -206,27 +267,67 @@ function ProjectsTable({ rows, loaded, selected, onSelect }: ProjectsTableProps)
       {
         id: 'activeDays',
         header: c.activeDays,
-        sortValue: (row) => row.activeDays,
-        render: (row) => <span className="num">{formatInt(row.activeDays)}</span>,
+        sortValue: ({ row }) => row.activeDays,
+        render: ({ row }) => <span className="num">{formatInt(row.activeDays)}</span>,
       },
       {
         id: 'mainModel',
         header: c.mainModel,
         align: 'start',
         firstDirection: 'asc',
-        sortValue: (row) => row.mainModel,
-        render: (row) => <span className="cell-accent">{row.mainModel || NO_VALUE}</span>,
+        sortValue: ({ row }) => row.mainModel,
+        render: ({ row }) => <span className="cell-accent">{row.mainModel || NO_VALUE}</span>,
       },
       {
         id: 'lastUsed',
         header: c.lastUsed,
-        sortValue: (row) => row.lastUsed,
-        render: (row) => (
+        sortValue: ({ row }) => row.lastUsed,
+        render: ({ row }) => (
           <span className="cell-muted">{formatRelativeDay(row.lastUsed, today)}</span>
         ),
       },
     ];
   }, [rows, today, c]);
+
+  // Top-level rows and container folders sort by the chosen column, subfolders within
+  // their folder. A search that matches a subfolder shows it inside its open folder.
+  const lines = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    const matches = (line: TableLine) => line.label.toLowerCase().includes(needle);
+    const column = columns.find((candidate) => candidate.id === sort.column);
+    const order = (list: TableLine[]) =>
+      column?.sortValue ? sortRows(list, column.sortValue, sort.direction) : list;
+
+    const result: { line: TableLine; open: boolean }[] = [];
+    for (const top of order(rows.map((row) => lineOf(row, null)))) {
+      const children = top.row.children?.map((child) => lineOf(child, top.row)) ?? [];
+      const folderMatches = !needle || matches(top);
+      const matchingChildren = needle ? children.filter(matches) : children;
+      if (!folderMatches && matchingChildren.length === 0) continue;
+
+      const searchOpens = needle !== '' && matchingChildren.length > 0;
+      const open = children.length > 0 && (searchOpens || expanded.has(top.row.name));
+      result.push({ line: top, open });
+      if (open) {
+        const shown = searchOpens && !folderMatches ? matchingChildren : children;
+        for (const child of order(shown)) result.push({ line: child, open: false });
+      }
+    }
+    return result;
+  }, [rows, query, sort, columns, expanded]);
+
+  const openByKey = useMemo(
+    () => new Map(lines.map(({ line, open }) => [line.key, open])),
+    [lines],
+  );
+
+  const toggle = (folder: string) =>
+    setExpanded((previous) => {
+      const next = new Set(previous);
+      if (next.has(folder)) next.delete(folder);
+      else next.add(folder);
+      return next;
+    });
 
   return (
     <section className="card table-card projects-table">
@@ -249,22 +350,60 @@ function ProjectsTable({ rows, loaded, selected, onSelect }: ProjectsTableProps)
       <DataTable
         label={c.label}
         columns={columns}
-        rows={visible}
-        rowKey={(row) => row.name}
-        initialSort={{ column: 'tokens', direction: 'desc' }}
-        onSelect={onSelect}
-        selectedKey={selected}
+        rows={lines.map(({ line }) => line)}
+        rowKey={(line) => line.key}
+        sort={sort}
+        onSortChange={setSort}
+        onSelect={(line) => onSelect(line.selection)}
+        selectedKey={selected ? selectionKey(selected) : null}
+        rowClassName={(line) =>
+          line.parent ? 'is-child' : line.row.children ? 'is-folder' : undefined
+        }
+        rowPrefix={(line) => {
+          if (!line.row.children || line.parent) {
+            return <span className="row-toggle-space" aria-hidden="true" />;
+          }
+          const open = openByKey.get(line.key) === true;
+          const name = line.row.name;
+          return (
+            <button
+              type="button"
+              className="row-toggle"
+              aria-expanded={open}
+              aria-label={open ? c.collapse(name) : c.expand(name)}
+              title={open ? c.collapse(name) : c.expand(name)}
+              onClick={(event) => {
+                event.stopPropagation();
+                toggle(name);
+              }}
+            >
+              <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+            </button>
+          );
+        }}
         emptyText={!loaded ? NO_VALUE : query.trim() ? c.noMatch(query.trim()) : c.empty}
       />
     </section>
   );
 }
 
-function ProjectPanel({ project, filters }: { project: string; filters: Filters }) {
+/** Subfolders of a container folder row, its own top-level usage left out. */
+function countSubfolders(row: ProjectRow): number {
+  return (row.children ?? []).filter((child) => child.name !== row.name).length;
+}
+
+interface ProjectPanelProps {
+  selection: Selection;
+  label: string;
+  filters: Filters;
+}
+
+function ProjectPanel({ selection, label, filters }: ProjectPanelProps) {
   const today = useToday();
+  const { project, folder } = selection;
   const fetchDetail = useCallback(
-    () => window.api.getProjectDetail(project, filters),
-    [project, filters],
+    () => window.api.getProjectDetail(project, filters, folder),
+    [project, folder, filters],
   );
   const { data, loading } = useUsageQuery(fetchDetail);
   const p = t.panel;
@@ -272,12 +411,13 @@ function ProjectPanel({ project, filters }: { project: string; filters: Filters 
   return (
     <section
       className={loading ? 'card project-panel is-loading' : 'card project-panel'}
-      aria-label={p.label(project)}
+      aria-label={p.label(label)}
       aria-busy={loading}
     >
       <header className="project-panel-header">
         <h2 className="card-title">
-          {p.title} · <span className="project-panel-name num">{project}</span>
+          {p.title} · <span className="project-panel-name num">{label}</span>
+          {folder && <span className="cell-muted"> · {p.wholeFolder}</span>}
         </h2>
         <Summary detail={data} />
       </header>
