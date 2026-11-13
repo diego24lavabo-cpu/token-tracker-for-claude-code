@@ -20,7 +20,7 @@ Status of the build plan in [SPEC.md](SPEC.md) §8. Read this first when resumin
 | 11. Packaging, release, demo   | `577d554` + `37fd22d` | `.dmg` + `.exe` config, icons, `release.yml`, demo mode, README screenshots   |
 | 12. Windows testing and fixes  | see `git log`         | Setup + portable `.exe` checked by hand, portable login and sync write fixes  |
 
-CI (lint, typecheck, tests on macOS and Windows) is green up to `57ade16`. **v0.1.1 is published** (tag on `3dbdd53`, built by `release.yml`); v0.1.0 was never published, its draft and tag are deleted.
+CI (lint, typecheck, tests on macOS and Windows) is green up to `487ca84`. **v0.1.1 is published** (tag on `3dbdd53`, built by `release.yml`); v0.1.0 was never published, its draft and tag are deleted.
 
 ## Decisions and deviations from the spec
 
