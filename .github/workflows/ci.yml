@@ -15,6 +15,8 @@ jobs:
   test:
     name: Lint, typecheck and test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # The job takes 2 minutes: a hang fails it quickly. Waiting for a runner does not count.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:

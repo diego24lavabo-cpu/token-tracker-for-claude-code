@@ -17,5 +17,8 @@ export interface DemoDataOptions {
   dayOffRate?: number;
 }
 
+/** Seeded random numbers in [0, 1) (mulberry32). */
+export function createRandom(seed: number): () => number;
+
 /** Writes a synthetic Claude Code `projects` folder and returns the number of sessions. */
 export function generateDemoData(output: string, options?: DemoDataOptions): number;

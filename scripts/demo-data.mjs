@@ -32,6 +32,25 @@ const WORKFLOW_TYPES = [
 const DAY = 86_400_000;
 
 /**
+ * Seeded random numbers in [0, 1): mulberry32, with 32-bit integer steps. Its state only
+ * comes back after 2^32 draws. (The generator before it, an LCG computed in doubles, lost
+ * precision and repeated after about 10,000 draws, which gave later sessions the ids, and
+ * the files, of earlier ones.)
+ *
+ * @param {number} seed
+ */
+export function createRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
  * Empties `root` for new data, or throws when it is a real Claude Code log folder or a
  * non-empty folder this module did not write. Nothing else is ever deleted.
  */
@@ -84,16 +103,7 @@ export function generateDemoData(output, options = {}) {
 
   prepareFolder(root);
 
-  // mulberry32: 32-bit integer steps, so the sequence does not repeat after a few thousand
-  // draws (which gave later sessions the ids, and files, of earlier ones).
-  let seed = initialSeed >>> 0;
-  const rand = () => {
-    seed = (seed + 0x6d2b79f5) >>> 0;
-    let t = seed;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+  const rand = createRandom(initialSeed);
   const int = (min, max) => Math.floor(min + rand() * (max - min + 1));
   const pick = (list) => list[Math.floor(rand() * list.length)];
   const hex = (n) => Array.from({ length: n }, () => '0123456789abcdef'[int(0, 15)]).join('');

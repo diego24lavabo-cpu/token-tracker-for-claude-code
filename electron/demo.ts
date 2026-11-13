@@ -100,6 +100,13 @@ export function createDemoEnvironment(
   };
 }
 
+export interface DemoWorldSize {
+  /** Days of logs on this machine (default a year). */
+  localDays?: number;
+  /** Days of logs on the second computer (default four months). */
+  otherDays?: number;
+}
+
 /**
  * Writes the sample logs of this machine (a year) and of a second computer (four months,
  * partly the same projects), then the second computer's sync files.
@@ -108,13 +115,14 @@ export async function generateDemoWorld(
   env: DemoEnvironment,
   platform: Platform,
   appVersion: string,
+  { localDays = 365, otherDays = 120 }: DemoWorldSize = {},
 ): Promise<void> {
   const { local, other } = machinesFor(platform);
-  generateDemoData(env.logRoot, { days: 365, seed: 42, paths: local.paths });
+  generateDemoData(env.logRoot, { days: localDays, seed: 42, paths: local.paths });
 
   const otherRoot = path.join(env.root, 'logs', 'other-machine', 'projects');
   generateDemoData(otherRoot, {
-    days: 120,
+    days: otherDays,
     seed: 7,
     paths: other.paths,
     projects: ['demo-app', 'web-shop', 'infra-scripts'],
