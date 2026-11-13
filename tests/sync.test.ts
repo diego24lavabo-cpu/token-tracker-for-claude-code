@@ -431,6 +431,29 @@ describe('writing', () => {
     expect(fs.existsSync(path.dirname(missing))).toBe(false);
   });
 
+  it('writes again once Google Drive is back after a failed write', async () => {
+    const { myDrive, folder } = fakeDrive();
+    const db = database('Tower', 'win32');
+    await scanLogs(db, [fixtureRoot('win')]);
+    const { service } = syncFor(db, 'win32');
+    service.setFolder(folder, true);
+    await service.setEnabled(true, noDrive);
+    const machineFile = path.join(folder, 'machines', db.machineId, 'machine.json');
+    expect(fs.existsSync(machineFile)).toBe(true);
+
+    // Drive is not mounted yet (the app was launched at login): the write fails.
+    fs.rmSync(myDrive, { recursive: true });
+    expect(service.writeOwnFiles(false)).toBe(false);
+    expect(service.status().state).toBe('pending');
+
+    // Drive mounts; the next read finds it and schedules the write, without a local change.
+    fs.mkdirSync(myDrive);
+    await service.readNow();
+    service.flushOnQuit();
+    expect(fs.existsSync(machineFile)).toBe(true);
+    expect(fs.existsSync(path.join(folder, 'machines', db.machineId, '2026.json'))).toBe(true);
+  });
+
   it('needs a folder when Google Drive is not found, and picks the only one found', async () => {
     const db = database('Tower', 'win32');
     const { service } = syncFor(db, 'win32');

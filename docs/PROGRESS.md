@@ -17,9 +17,10 @@ Status of the build plan in [SPEC.md](SPEC.md) §8. Read this first when resumin
 | 9. Settings, CSV, watching     | `7f1b298`             | Settings page, container switches, price editor, chokidar, CSV, rebuild       |
 | 9b. Container folder groups    | `2f5e874`             | `<folder> › <subfolder>` names, expandable folder rows on Projects            |
 | 10. Drive sync + Machines page | `9e1c45c`             | Sync files, Drive detection, merge, Machines page, aliases, retention choice  |
-| 11. Packaging, release, demo   | see `git log`         | `.dmg` + `.exe` config, icons, `release.yml`, demo mode, README screenshots   |
+| 11. Packaging, release, demo   | `577d554` + `37fd22d` | `.dmg` + `.exe` config, icons, `release.yml`, demo mode, README screenshots   |
+| 12. Windows testing and fixes  | see `git log`         | Setup + portable `.exe` checked by hand, portable login and sync write fixes  |
 
-CI (lint, typecheck, tests on macOS and Windows) is green up to `9e1c45c`.
+CI (lint, typecheck, tests on macOS and Windows) is green up to `9e1c45c`; `release.yml` built the `v0.1.0` draft from `37fd22d`.
 
 ## Decisions and deviations from the spec
 
@@ -194,13 +195,28 @@ CI (lint, typecheck, tests on macOS and Windows) is green up to `9e1c45c`.
 
 - Schema version 6. Versions 2 and 3 empty the `files` table so the transcripts still on disk are read again to fill the new columns. Version 4 adds `session_projects` and rebuilds the derived tables from `messages` (checked on a real version-3 database). Version 5 only rebuilds the derived tables, for the `<folder> › <subfolder>` names (checked on a version-4 database with a flagged folder). Version 6 adds `session_days`, `session_models`, `subagent_models`, `remote_files`, `machines.hidden`, `machines.app_version`, and rebuilds the derived tables. The dev database was migrated 5 → 6 by a dev run during step 10; a snapshot of it in the built app gives Overview total = sum of `hourly`, and the sessions' costs add up to the Overview cost exactly.
 
+**Windows testing (step 12, 2026-11-13)**
+
+The `v0.1.0` draft release (built by `release.yml`: two `.dmg`, setup and portable `.exe`, `SHA256SUMS.txt`) was installed on this PC and checked by the user, one item at a time:
+
+- SmartScreen: "Windows protected your PC" → More info → Run anyway, for the setup and the portable `.exe` (browser downloads). The installer offers per-user / all users and the folder; Start menu entry and desktop shortcut with the app icon. Default install: `%LOCALAPPDATA%\Programs\Token Tracker for Claude Code`.
+- Title bar: `titleBarOverlay` buttons in the sidebar color, hover states, red close, Windows 11 Snap layouts, drag, double-click to maximize, minimum size 1100×720. Nothing overlaps the sync status.
+- Logs: 19 files, 1 subagent file (the Explore run of Nov 11, 16 responses), 0 lines skipped; equal to the files on disk.
+- Native SQLite: the packaged app loads `better_sqlite3.node` from `app.asar.unpacked` and migrated to schema 6; "Rebuild database" (native confirmation, Cancel does nothing) gives the same numbers. "Database size" counts `usage.db` + `usage.db-wal` (2.7 MB right after a rebuild; the WAL is folded back on quit): expected.
+- Fonts: Inter and JetBrains Mono render sharply; `›` `·` `—` fine.
+- Sync with the Mac: the installed app has its own database and machine id (`c33d…`); the dev database's id (`d3dd…`) is a separate machine, **hidden** in the installed app, its Drive folder deleted. The user renamed this PC, set the container folders (`VS Code`, `AURA_GAME`) and aliases again in the installed app, and removed the stale dev PC on the Mac. **Sync is now off in the dev database** (`sync_enabled = '0'`, folder kept), so a dev run no longer writes a second PC to the real Drive; turn it on only with a fake Drive.
+- Launch at login (installed): `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `io.github.diego24lavabo-cpu.tokentracker` (the AppUserModelId) = the quoted `.exe` path; the app starts after sign-in and is listed as enabled in Task Manager → Startup apps.
+- Portable `.exe`: same data folder and single-instance lock as the installed app (quit one before starting the other), so the same database. **Bug, fixed**: Launch at login registered `%TEMP%\<random>\Token Tracker for Claude Code.exe`, the copy the portable runs from, which is deleted on quit (seen: the folder was gone after quitting); and the switch read "off" while the installed app's entry existed. `loginItemOptions()` in `main.ts` now passes `path: PORTABLE_EXECUTABLE_FILE` (set by electron-builder's portable launcher) to `getLoginItemSettings` / `setLoginItemSettings`. Checked on a local `npm run dist:win` portable build with a scratch `--user-data-dir` over CDP: the entry is the portable `.exe`, the switch reads back on, off removes the value. Both builds share the registry value name, so the last one switched on wins.
+- **Sync fix**: a write that failed because the Drive folder was missing (app launched at login before Drive mounts `G:`) was not retried when the folder came back: the numbers waited for the next local change or the hourly heartbeat. `SyncService.writeFailed` now schedules a write (`localDataChanged`, 60 s) as soon as a read or write finds the folder again (test in `tests/sync.test.ts`, fails without the fix).
+- Not checked in step 12: `--demo` in the installed app, `npm run dev` / `dev:demo` from source (both used during earlier steps on this PC).
+
 ## Open points
 
 - The container flags, file watching switch and added folders are per database: the dev database and the installed app's each keep their own (set them in Settings).
 - The first real subagent transcript on this PC (an Explore run, 2026-11-11) shows up in the Projects panel under TTfCC and on the Agents page. Workflow, `/btw`, warm-up and legacy inline agents are still verified only on synthetic data.
-- Not checked yet by a human: the macOS title bar (traffic lights), and the Windows window buttons, which screenshots do not capture.
+- Not checked yet by a human: the macOS title bar (traffic lights). The Windows buttons were checked in step 12.
 - Prices must be verified before release.
-- Launch at login is only testable in the installed app: to check on the Mac with the installed `.dmg` build, and on Windows in step 12.
+- Launch at login: checked on Windows (installed and portable, step 12); still to check on the Mac with the installed `.dmg` build.
 - chokidar 4 uses one `fs.watch` per folder. Fine for this PC's history; re-check the startup time and handle count with ~500 session folders (SPEC §9).
 - `getSessions` loads every session of the range to sort and page them in JS. Instant on this PC's history (a few dozen sessions); re-check with years of data, `1y` on a heavy user. `getAgents` does the same with the period's subagent runs.
 
@@ -211,12 +227,9 @@ CI (lint, typecheck, tests on macOS and Windows) is green up to `9e1c45c`.
 - Detection reads the Windows volume labels with PowerShell (~150 ms, only with ≥ 2 Drive accounts). If that is ever blocked, the list just shows paths.
 - A session's clock time is shown in this machine's zone (see Sync above).
 
-## Step 12 starts here: Windows testing and fixes
+## Next: release v0.1.1
 
-Spec: SPEC.md §8 step 12. Suggested effort: `high`.
+The build plan (SPEC §8) is complete. `v0.1.0` stays an unpublished draft (its portable `.exe` has the launch-at-login bug). To release the fixes (needs the user's go-ahead for the tag): bump `package.json` (and the lockfile's root entries) to `0.1.1`, turn CHANGELOG's Unreleased section into `## [0.1.1] - <day>` with its link reference, push `main`, `git tag v0.1.1 && git push origin v0.1.1`, check the new draft, then publish it and delete the `v0.1.0` draft (keep the tag, or delete it too).
 
-1. First the release (needs the user's go-ahead for the tag): push `main`, then `git tag v0.1.0 && git push origin v0.1.0`; `release.yml` must create a draft release with the two `.dmg`, the two `.exe` and `SHA256SUMS.txt`. Check the CHANGELOG date first.
-2. On the PC: install the setup `.exe` and run the portable one (SmartScreen: More info → Run anyway), check log detection with subagents, the native SQLite module in the packaged app, the title bar buttons (`titleBarOverlay`), fonts, sync with the Mac, launch at login, and `--demo` (`& "$env:LOCALAPPDATA\Programs\Token Tracker for Claude Code\Token Tracker for Claude Code.exe" --demo`).
-3. From source on the PC: `npm install`, `npm run dev`, `npm run dev:demo`, `npm test` (from PowerShell, see below).
-4. To drive the built app without a human: start it with `--user-data-dir=<scratch>` and `--remote-debugging-port=NNNN` (or `--demo`, which needs neither a fake home nor a scratch folder), then use CDP (`Runtime.evaluate` on `window.api.*`, `Emulation.setDeviceMetricsOverride`, `Page.captureScreenshot`). The router is a `HashRouter`: navigate with `location.hash = '#/projects'`, never `history.pushState` (that moves the page off `index.html` and the IPC guard then refuses every call). The page scrolls inside `.main`: take its `scrollHeight` (+ 44 px title bar) for full-page captures. **Never** run `electron .` without `--demo` or `--user-data-dir`: it writes into the installed app's data folder. **Never** pick `G:\` / `H:\` (the user's real Drive accounts) in such a run.
-   Run tests from PowerShell: under Git Bash, vitest loads twice (drive letter case) and fails with "failed to find the current suite". Bash heredocs that contain quotes also fail in this shell: write files with the editor tools instead.
+Driving the built app without a human: start it with `--user-data-dir=<scratch>` and `--remote-debugging-port=NNNN` (or `--demo`, which needs neither a fake home nor a scratch folder), then use CDP (`Runtime.evaluate` on `window.api.*`, `Emulation.setDeviceMetricsOverride`, `Page.captureScreenshot`). The router is a `HashRouter`: navigate with `location.hash = '#/projects'`, never `history.pushState` (that moves the page off `index.html` and the IPC guard then refuses every call). The page scrolls inside `.main`: take its `scrollHeight` (+ 44 px title bar) for full-page captures. **Never** run `electron .` without `--demo` or `--user-data-dir`: it writes into the installed app's data folder. **Never** pick `G:\` / `H:\` (the user's real Drive accounts) in such a run.
+Run tests from PowerShell: under Git Bash, vitest loads twice (drive letter case) and fails with "failed to find the current suite". Bash heredocs that contain quotes also fail in this shell: write files with the editor tools instead.

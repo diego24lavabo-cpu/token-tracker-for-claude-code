@@ -138,6 +138,8 @@ export class SyncService {
   private reading = false;
   /** Null until the first read or write: then whether the folder could be reached. */
   private reachable: boolean | null = null;
+  /** The last write failed (Drive not mounted yet, say): write again once it is reachable. */
+  private writeFailed = false;
   private problems = new Map<string, NonNullable<SyncMachine['problem']>>();
   private conflicts = new Map<string, Set<string>>();
   /** Files already found unreadable, by `<machine>/<file>` and signature, to log them once. */
@@ -285,7 +287,7 @@ export class SyncService {
 
     // The Drive folder must exist: creating it would make a local folder Drive never syncs.
     const driveRoot = path.dirname(folder);
-    if (!exists(driveRoot)) return this.markReachable(false);
+    if (!exists(driveRoot)) return this.writeFailedNow();
 
     try {
       const machineDir = path.join(folder, MACHINES_FOLDER, db.machineId);
@@ -327,11 +329,17 @@ export class SyncService {
       }
       db.setSetting(SETTING_WRITTEN, JSON.stringify(written));
       this.lastWriteAt = now;
+      this.writeFailed = false;
       return this.markReachable(true);
     } catch (error) {
       console.warn(`[sync] Could not write the sync files: ${errorCode(error)}`);
-      return this.markReachable(false);
+      return this.writeFailedNow();
     }
+  }
+
+  private writeFailedNow(): boolean {
+    this.writeFailed = true;
+    return this.markReachable(false);
   }
 
   /** Writes one year when its text changed or its file is missing. True when written. */
@@ -356,6 +364,9 @@ export class SyncService {
       if (!reachable) console.warn('[sync] The sync folder cannot be reached: sync is pending.');
       this.host.onStatusChanged();
     }
+    // Launched at login, the app can start before Google Drive has mounted its folder: the
+    // write that failed then is scheduled again as soon as a read finds the folder.
+    if (reachable && this.writeFailed) this.localDataChanged();
     return reachable;
   }
 

@@ -301,6 +301,16 @@ function fileSize(file: string): number {
   }
 }
 
+/**
+ * The program Windows starts at login. The portable build runs from a temporary copy that is
+ * deleted when it quits: register the portable .exe itself, which electron-builder names in
+ * PORTABLE_EXECUTABLE_FILE. Elsewhere Electron's default (this executable) is right.
+ */
+function loginItemOptions(): { path?: string } {
+  const portable = process.env.PORTABLE_EXECUTABLE_FILE;
+  return process.platform === 'win32' && portable ? { path: portable } : {};
+}
+
 function launchAtLoginUnavailable(): SettingsData['app']['launchAtLoginUnavailable'] {
   if (isDev) return 'development';
   return process.platform === 'darwin' || process.platform === 'win32' ? null : 'platform';
@@ -375,7 +385,8 @@ async function buildSettings(): Promise<SettingsData> {
     },
     app: {
       version: app.getVersion(),
-      launchAtLogin: unavailable === null && app.getLoginItemSettings().openAtLogin,
+      launchAtLogin:
+        unavailable === null && app.getLoginItemSettings(loginItemOptions()).openAtLogin,
       launchAtLoginUnavailable: unavailable,
       fileWatching: db ? getFileWatching(db) : false,
       dataFolder: tildify(dataFolder()),
@@ -399,7 +410,7 @@ async function applySettings(input: unknown): Promise<SettingsData> {
   const db = requireWritableDatabase();
 
   if (patch.launchAtLogin !== undefined && launchAtLoginUnavailable() === null) {
-    app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin });
+    app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin, ...loginItemOptions() });
   }
   if (patch.pricing) {
     savePricing(dataFolder(), patch.pricing);

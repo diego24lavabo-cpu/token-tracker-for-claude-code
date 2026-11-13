@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows portable `.exe`: "Launch at login" registered the temporary copy the portable app runs from, which is deleted when it quits, so nothing started at the next sign-in (and the installed app's entry was replaced). It now registers the portable `.exe` itself.
+- Sync: when the app starts before Google Drive has mounted its folder (launched at login), this computer's numbers are now written as soon as the folder appears, instead of at the next change or the hourly heartbeat.
+
 ## [0.1.0] - 2026-11-13
 
 First release. The builds are not code-signed yet: see the README for how to open them the first time on macOS and Windows.
