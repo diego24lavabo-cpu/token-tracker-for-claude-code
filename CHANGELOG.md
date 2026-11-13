@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [0.1.1] - 2026-11-13
 
-First published release: everything listed under 0.1.0 below, plus these fixes. The builds are not code-signed yet: see the README for how to open them the first time on macOS and Windows.
+First published release: everything listed under 0.1.0 in the [changelog](https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code/blob/main/CHANGELOG.md), plus these fixes. The builds are not code-signed yet: see the README for how to open them the first time on macOS and Windows.
 
 ### Fixed
 
