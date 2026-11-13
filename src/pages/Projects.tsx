@@ -27,6 +27,7 @@ import {
   formatRelativeDay,
   formatTokens,
 } from '../lib/format';
+import { folderOfSelection, isFolderOpen, toggleFolder } from '../lib/folderAccordion';
 import { sortRows } from '../lib/sort';
 import { useAppData } from '../state/appData';
 
@@ -179,8 +180,8 @@ function ProjectsTable({ rows, loaded, selected, onSelect }: ProjectsTableProps)
   const today = useToday();
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortState>(INITIAL_SORT);
-  // Container folders whose subfolders are shown. Collapsed by default.
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  // The container folder whose subfolders are shown (accordion: one at a time). None by default.
+  const [openFolder, setOpenFolder] = useState<string | null>(null);
   const c = t.table;
 
   const columns = useMemo((): Column<TableLine>[] => {
@@ -306,7 +307,12 @@ function ProjectsTable({ rows, loaded, selected, onSelect }: ProjectsTableProps)
       if (!folderMatches && matchingChildren.length === 0) continue;
 
       const searchOpens = needle !== '' && matchingChildren.length > 0;
-      const open = children.length > 0 && (searchOpens || expanded.has(top.row.name));
+      const open =
+        children.length > 0 &&
+        isFolderOpen(top.row.name, openFolder, {
+          active: needle !== '',
+          matchesSubfolder: matchingChildren.length > 0,
+        });
       result.push({ line: top, open });
       if (open) {
         const shown = searchOpens && !folderMatches ? matchingChildren : children;
@@ -314,20 +320,22 @@ function ProjectsTable({ rows, loaded, selected, onSelect }: ProjectsTableProps)
       }
     }
     return result;
-  }, [rows, query, sort, columns, expanded]);
+  }, [rows, query, sort, columns, openFolder]);
 
   const openByKey = useMemo(
     () => new Map(lines.map(({ line, open }) => [line.key, open])),
     [lines],
   );
 
-  const toggle = (folder: string) =>
-    setExpanded((previous) => {
-      const next = new Set(previous);
-      if (next.has(folder)) next.delete(folder);
-      else next.add(folder);
-      return next;
-    });
+  const toggle = (folder: string) => setOpenFolder((open) => toggleFolder(open, folder));
+
+  // Clearing the search goes back to one open group: the one holding the selected row.
+  const changeQuery = (next: string) => {
+    if (query.trim() !== '' && next.trim() === '') {
+      setOpenFolder(folderOfSelection(rows, selected));
+    }
+    setQuery(next);
+  };
 
   return (
     <section className="card table-card projects-table">
@@ -343,7 +351,7 @@ function ProjectsTable({ rows, loaded, selected, onSelect }: ProjectsTableProps)
             type="search"
             value={query}
             placeholder={c.searchPlaceholder}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => changeQuery(event.target.value)}
           />
         </label>
       </header>
