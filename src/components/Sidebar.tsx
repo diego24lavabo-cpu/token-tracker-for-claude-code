@@ -39,7 +39,8 @@ function SourceBox() {
   const { info } = useAppData();
   if (!info) return <div className="sidebar-source" aria-hidden="true" />;
 
-  const roots = info.logRoots.length > 0 ? info.logRoots : [info.defaultLogRoot];
+  // The sample data of demo mode sits in a temporary folder: its path says nothing.
+  const roots = info.demo ? [] : info.logRoots.length > 0 ? info.logRoots : [info.defaultLogRoot];
   const note = info.demo
     ? en.source.sampleData
     : info.logRoots.length === 0
@@ -54,7 +55,7 @@ function SourceBox() {
           {root}
         </span>
       ))}
-      {note}
+      {note && <span className="sidebar-source-note">{note}</span>}
     </div>
   );
 }

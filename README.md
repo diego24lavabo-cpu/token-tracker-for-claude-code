@@ -4,13 +4,13 @@ A desktop app for macOS and Windows that reads your local Claude Code session lo
 
 Everything runs locally. No account, no API key, no telemetry, no network calls.
 
-> **Status: early development.** The app is being built step by step (see [docs/SPEC.md](docs/SPEC.md)). The window, the navigation and the log reader with its local database exist; the data pages are next. Screenshots will be added with the first release, and they will always be taken in demo mode with generated sample data.
+![Overview: total, input and output tokens, estimated cost, tokens per day and shortcuts to every section](docs/screenshots/overview.png)
+
+<sub>All screenshots are taken in demo mode, with generated sample data from two fake computers.</sub>
 
 > Not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic.
 
 ## Features
-
-Planned for `0.1.0`:
 
 - **Overview** with the essentials: total, input and output tokens, estimated cost, tokens per day.
 - **Projects**: usage per project, with a detailed analysis panel.
@@ -22,14 +22,34 @@ Planned for `0.1.0`:
 - **Permanent history**: the app keeps its own local database, so your history survives Claude Code's transcript cleanup.
 - **CSV export** and an editable price table for the cost estimate.
 
+| Projects                                                                     | Calendar                                                                                    |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| ![Projects table with the analysis panel](docs/screenshots/projects.png)     | ![12-month heatmap, streaks, weekday, hour and month charts](docs/screenshots/calendar.png) |
+| **Agents**                                                                   | **Machines**                                                                                |
+| ![Subagent share, kinds and cost by agent type](docs/screenshots/agents.png) | ![Two computers synced through Google Drive](docs/screenshots/machines.png)                 |
+| **Models**                                                                   |                                                                                             |
+| ![Model cards, weekly share and token types](docs/screenshots/models.png)    |                                                                                             |
+
 ## Install
 
-Installers will be published on the [Releases](https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code/releases) page: a `.dmg` for macOS (Apple Silicon and Intel) and an `.exe` installer plus a portable `.exe` for Windows.
+Download the latest version from the [Releases](https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code/releases) page:
 
-The builds are **not code-signed** yet, so your system will warn you the first time:
+| System               | File                                           |
+| -------------------- | ---------------------------------------------- |
+| macOS, Apple silicon | `Token-Tracker-<version>-mac-arm64.dmg`        |
+| macOS, Intel         | `Token-Tracker-<version>-mac-x64.dmg`          |
+| Windows, installer   | `Token-Tracker-<version>-win-x64-setup.exe`    |
+| Windows, no install  | `Token-Tracker-<version>-win-x64-portable.exe` |
 
-- **macOS**: right-click (or Control-click) the app, choose **Open**, then confirm with **Open**. On recent macOS versions you may need **System Settings → Privacy & Security → Open Anyway** instead.
-- **Windows**: on the SmartScreen dialog, click **More info**, then **Run anyway**. The labels can appear in your system language.
+On macOS, open the `.dmg` and drag the app into **Applications**. On Windows, run the setup, or start the portable `.exe` from any folder.
+
+The builds are **not code-signed** yet (that needs a paid Apple Developer ID and a Windows code-signing certificate), so your system warns you the first time you open the app:
+
+- **macOS 15 (Sequoia) and later**: open the app once; macOS says it could not verify it, click **Done**. Then open **System Settings → Privacy & Security**, scroll down to the message about Token Tracker for Claude Code and click **Open Anyway**, then **Open Anyway** again and confirm with your password or Touch ID. You only do this once.
+- **macOS 14 (Sonoma) and earlier**: right-click (or Control-click) the app in Applications, choose **Open**, then confirm with **Open**.
+- **Windows**: on the blue "Windows protected your PC" (SmartScreen) dialog, click **More info**, then **Run anyway**. The labels can appear in your system language.
+
+To check a download, compare it with `SHA256SUMS.txt` on the release page (`shasum -a 256 <file>` on macOS, `Get-FileHash <file>` in PowerShell).
 
 ## Where the data comes from
 
@@ -87,14 +107,30 @@ npm install
 npm run dev
 ```
 
-| Command             | What it does                                                  |
-| ------------------- | ------------------------------------------------------------- |
-| `npm run dev`       | start the app with hot reload                                 |
-| `npm run dev:demo`  | start the app in demo mode (sample data)                      |
-| `npm run build`     | typecheck and build the app into `dist/` and `dist-electron/` |
-| `npm test`          | run the unit tests                                            |
-| `npm run lint`      | run ESLint and the Prettier check                             |
-| `npm run typecheck` | run the TypeScript compiler without emitting                  |
+| Command             | What it does                                                                   |
+| ------------------- | ------------------------------------------------------------------------------ |
+| `npm run dev`       | start the app with hot reload                                                  |
+| `npm run dev:demo`  | start the app in demo mode (sample data)                                       |
+| `npm run build`     | typecheck and build the app into `dist/` and `dist-electron/`                  |
+| `npm test`          | run the unit tests                                                             |
+| `npm run lint`      | run ESLint and the Prettier check                                              |
+| `npm run typecheck` | run the TypeScript compiler without emitting                                   |
+| `npm run dist:mac`  | build the two `.dmg` files into `release/` (on a Mac)                          |
+| `npm run dist:win`  | build the setup and portable `.exe` into `release/` (on Windows)               |
+| `npm run icons`     | render `build/icon.png` and `build/icon.icns` from `build/icon.svg` (on a Mac) |
+
+Releases are built by GitHub Actions: pushing a `v*` tag (for example `v0.1.0`) runs [release.yml](.github/workflows/release.yml), which builds both platforms and creates a **draft** release with the notes of that version from [CHANGELOG.md](CHANGELOG.md).
+
+### Demo mode
+
+Demo mode shows generated sample data instead of your own: a year of fake sessions and subagents on "this computer", plus a second fake computer synced through a temporary folder. It never reads or writes your history, your Claude Code logs or settings, or Google Drive, and nothing can be changed in Settings. The sample data lives in a temporary folder that is emptied when the app quits.
+
+- From source: `npm run dev:demo`.
+- Installed app: start it with `--demo` (or the environment variable `TOKEN_TRACKER_DEMO=1`):
+  - macOS: `open -n -a "Token Tracker for Claude Code" --args --demo`
+  - Windows: `& "$env:LOCALAPPDATA\Programs\Token Tracker for Claude Code\Token Tracker for Claude Code.exe" --demo`
+
+A demo window can stay open next to the normal one. `node scripts/gen-demo-data.mjs <folder>` writes the same kind of sample logs into a folder of your choice.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the project layout and the rules for contributions.
 

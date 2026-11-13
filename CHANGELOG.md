@@ -6,8 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-13
+
+First release. The builds are not code-signed yet: see the README for how to open them the first time on macOS and Windows.
+
 ### Added
 
+- Installers: a `.dmg` for macOS on Apple silicon and on Intel, and a setup `.exe` plus a portable `.exe` for Windows (x64).
+- Demo mode (`--demo`, `TOKEN_TRACKER_DEMO=1` or `npm run dev:demo`): a year of generated sample data on two fake computers, without touching your own history, logs, settings or Google Drive.
 - Project scaffold: Electron, Vite, React and TypeScript.
 - Dark application window with a custom title bar on macOS and Windows.
 - Sidebar navigation with the eight sections and keyboard shortcuts.
@@ -32,3 +38,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Project aliases: map an old project name to the new one, for example after renaming a folder, so both count as one project on every computer. Subfolders of a renamed container folder follow, and its container flag is kept.
 - "No logs found" state with a folder picker.
 - Repository files: license, contribution guide, security policy, issue and pull request templates, CI workflow.
+
+[Unreleased]: https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code/releases/tag/v0.1.0

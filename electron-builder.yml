@@ -14,20 +14,62 @@ files:
   - dist/**
   - dist-electron/**
   - package.json
+  # better-sqlite3 ships its C sources and a binary for every platform: keep only the
+  # binary of the platform and architecture being built.
+  - '!node_modules/better-sqlite3/{deps,src}/**'
+  - '!node_modules/better-sqlite3/binding.gyp'
+  - '!node_modules/better-sqlite3/prebuilds/**'
+  - 'node_modules/better-sqlite3/prebuilds/${platform}-${arch}.node'
+
+# The .node binary cannot be loaded from inside app.asar.
+asarUnpack:
+  - 'node_modules/better-sqlite3/prebuilds/*.node'
 
 mac:
   category: public.app-category.developer-tools
+  icon: build/icon.icns
+  darkModeSupport: true
   target:
     - target: dmg
       arch: [arm64, x64]
+  artifactName: Token-Tracker-${version}-mac-${arch}.${ext}
+  # Unsigned builds: an ad-hoc signature (no certificate) is still needed, because Apple
+  # silicon Macs refuse to run code without any signature. Hardened runtime would reject
+  # Electron's own frameworks under an ad-hoc signature.
+  # Signed builds: set `identity` to the "Developer ID Application" certificate (or remove
+  # it and provide CSC_LINK / CSC_KEY_PASSWORD), set `hardenedRuntime: true` and
+  # `notarize: true`; see the commented steps in .github/workflows/release.yml.
+  identity: '-'
+  hardenedRuntime: false
+
+dmg:
+  title: Token Tracker ${version}
 
 win:
+  icon: build/icon.png
   target:
     - target: nsis
       arch: [x64]
     - target: portable
       arch: [x64]
+  # Signed builds: provide WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD (a code-signing certificate);
+  # see .github/workflows/release.yml.
 
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  artifactName: Token-Tracker-${version}-win-${arch}-setup.${ext}
+
+portable:
+  artifactName: Token-Tracker-${version}-win-${arch}-portable.${ext}
+
+# Prepared for electron-updater, which is not installed: builds run with `--publish never`
+# and the release workflow uploads the files itself. To turn updates on later: add
+# electron-updater, call autoUpdater.checkForUpdatesAndNotify() in electron/main.ts, add the
+# `zip` mac target (Squirrel.Mac updates from a zip and needs a signed app), allow the
+# GitHub hosts in blockNetwork(), and upload latest*.yml + *.blockmap with the release.
+publish:
+  provider: github
+  owner: diego24lavabo-cpu
+  repo: token-tracker-for-claude-code
+  releaseType: draft

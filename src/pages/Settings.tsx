@@ -25,6 +25,7 @@ import {
   formatPercent,
   formatTimeAgo,
 } from '../lib/format';
+import { useAppData } from '../state/appData';
 
 const t = en.settings;
 const NO_VALUE = '—';
@@ -35,11 +36,14 @@ const STATUS_MS = 8_000;
 export function Settings() {
   const fetchSettings = useCallback(() => window.api.getSettings(), []);
   const { data } = useUsageQuery(fetchSettings, { syncStatus: true });
+  const { info } = useAppData();
   const disabled = !data?.available;
 
   return (
     <Page section="settings">
-      {data && !data.available && <p className="settings-notice">{t.unavailable}</p>}
+      {data && !data.available && (
+        <p className="settings-notice">{info?.demo ? t.demoMode : t.unavailable}</p>
+      )}
       <div className="settings-columns">
         <SourcesCard data={data} disabled={disabled} />
         <SyncCard data={data} disabled={disabled} />

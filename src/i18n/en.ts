@@ -82,7 +82,7 @@ export const en = {
 
   source: {
     label: 'Source:',
-    sampleData: 'Sample data',
+    sampleData: 'Sample data (demo mode)',
     notFound: 'No logs found yet',
   },
 
@@ -614,8 +614,9 @@ export const en = {
   },
 
   settings: {
-    unavailable:
-      'Settings cannot be changed in demo mode or when the usage database could not be opened.',
+    unavailable: 'Settings cannot be changed: the usage database could not be opened.',
+    demoMode:
+      'Demo mode: the app shows generated sample data from two fake computers, and nothing can be changed. Your own history, logs and Google Drive are not touched.',
     sources: {
       title: 'Data sources',
       folders: 'Claude Code folders',

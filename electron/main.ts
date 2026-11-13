@@ -70,6 +70,12 @@ import {
 } from './claudeSettings';
 import { buildCsvTable, csvFileName, toCsv } from './csv';
 import { UsageDatabase } from './db';
+import {
+  createDemoEnvironment,
+  generateDemoWorld,
+  removeDemoEnvironment,
+  type DemoEnvironment,
+} from './demo';
 import { syncFolderFromPick } from './drive';
 import { installAppMenu } from './menu';
 import {
@@ -114,6 +120,8 @@ const TITLE_BAR_HEIGHT = 44;
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 const isDev = Boolean(DEV_SERVER_URL);
 const isDemo = process.env.TOKEN_TRACKER_DEMO === '1' || process.argv.includes('--demo');
+/** The temporary sample data of demo mode, set up before the app is ready. */
+let demo: DemoEnvironment | null = null;
 
 const RENDERER_INDEX = path.join(__dirname, '..', 'dist', 'index.html');
 
@@ -163,7 +171,7 @@ function openDatabase(): void {
     fs.mkdirSync(folder, { recursive: true });
     pricing = loadPricing(folder);
     database = new UsageDatabase(path.join(folder, DATABASE_FILE), {
-      machineName: os.hostname(),
+      machineName: demo?.machineName ?? os.hostname(),
       platform: currentPlatform(),
     });
   } catch (error) {
@@ -195,9 +203,19 @@ const sync = new SyncService({
   onStatusChanged: notifySyncUpdated,
 });
 
+/** The log folders found by the app; in demo mode only the sample data. */
+function autoLogRoots(): string[] {
+  return demo ? [demo.logRoot] : existingLogRoots();
+}
+
+/** Claude Code's settings file; in demo mode a file that does not exist. */
+function claudeSettings(): string {
+  return demo ? demo.claudeSettingsFile : claudeSettingsFile();
+}
+
 /** The folders found by the app plus those added in Settings, that exist. */
 function currentLogRoots(): string[] {
-  const roots = existingLogRoots();
+  const roots = autoLogRoots();
   if (database) {
     for (const extra of getExtraLogRoots(database)) {
       if (isDirectory(extra) && !roots.some((root) => samePath(root, extra))) roots.push(extra);
@@ -291,7 +309,8 @@ function launchAtLoginUnavailable(): SettingsData['app']['launchAtLoginUnavailab
 async function buildSettings(): Promise<SettingsData> {
   const db = database;
   // Looking for Google Drive only matters while sync is on; turning it on looks itself.
-  const candidates = db && sync.enabled ? await sync.candidates() : [];
+  // Demo mode never looks at the real Drive folders (they name the account).
+  const candidates = db && sync.enabled && !demo ? await sync.candidates() : [];
   const stats = db?.stats();
   const filesPerRoot = db?.filesPerRoot() ?? new Map<string, number>();
   const filesIn = (folder: string) => {
@@ -307,7 +326,7 @@ async function buildSettings(): Promise<SettingsData> {
     files: filesIn(target),
   });
 
-  const autoRoots = existingLogRoots();
+  const autoRoots = autoLogRoots();
   const folders = (autoRoots.length > 0 ? autoRoots : [defaultLogRoot()]).map((root) =>
     folder(root, true),
   );
@@ -316,12 +335,12 @@ async function buildSettings(): Promise<SettingsData> {
   }
 
   const databaseFile = path.join(dataFolder(), DATABASE_FILE);
-  const settingsFile = claudeSettingsFile();
+  const settingsFile = claudeSettings();
   const retention = readRetention(settingsFile);
   const unavailable = launchAtLoginUnavailable();
 
   return {
-    available: db !== null,
+    available: db !== null && !demo,
     sources: {
       folders,
       filesScanned: stats?.files ?? 0,
@@ -369,9 +388,15 @@ function requireDatabase(): UsageDatabase {
   return database;
 }
 
+/** Settings and actions that change something are refused in demo mode (the UI disables them). */
+function requireWritableDatabase(): UsageDatabase {
+  if (demo) throw new Error('Nothing can be changed in demo mode');
+  return requireDatabase();
+}
+
 async function applySettings(input: unknown): Promise<SettingsData> {
   const patch = parseSettingsPatch(input);
-  const db = requireDatabase();
+  const db = requireWritableDatabase();
 
   if (patch.launchAtLogin !== undefined && launchAtLoginUnavailable() === null) {
     app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin });
@@ -411,7 +436,7 @@ async function applySettings(input: unknown): Promise<SettingsData> {
 }
 
 async function chooseSyncFolder(): Promise<ChooseFolderResult> {
-  requireDatabase();
+  requireWritableDatabase();
   const options: Electron.OpenDialogOptions = {
     title: en.dialogs.pickSyncFolder.title,
     buttonLabel: en.dialogs.pickSyncFolder.button,
@@ -435,7 +460,7 @@ async function chooseSyncFolder(): Promise<ChooseFolderResult> {
 /** Syncs through a "My Drive" folder found by the app; any other path is refused. */
 async function useSyncFolder(input: unknown): Promise<SettingsData> {
   const target = parseFolderPath(input);
-  requireDatabase();
+  requireWritableDatabase();
   const candidate = (await sync.candidates()).find((root) => samePath(root.path, target));
   if (!candidate) throw new Error('This folder is not one of the Google Drive folders found');
   sync.setFolder(path.join(candidate.path, SYNC_FOLDER_NAME), false);
@@ -447,7 +472,7 @@ async function useSyncFolder(input: unknown): Promise<SettingsData> {
 
 async function removeMachine(input: unknown): Promise<ActionResult> {
   const machineId = parseMachineIdArgument(input);
-  const db = requireDatabase();
+  const db = requireWritableDatabase();
   const machine = db.listAllMachines().find((item) => item.id === machineId);
   if (!machine || machine.isLocal) return { status: 'cancelled' };
 
@@ -477,7 +502,7 @@ function withWindow<T>(show: (window?: BrowserWindow) => Promise<T>): Promise<T>
 }
 
 async function addLogFolder(): Promise<AddFolderResult> {
-  const db = requireDatabase();
+  const db = requireWritableDatabase();
   const options: Electron.OpenDialogOptions = {
     title: en.dialogs.pickFolder.title,
     buttonLabel: en.dialogs.pickFolder.button,
@@ -502,7 +527,7 @@ async function addLogFolder(): Promise<AddFolderResult> {
 
 async function removeLogFolder(input: unknown): Promise<void> {
   const target = parseFolderPath(input);
-  const db = requireDatabase();
+  const db = requireWritableDatabase();
   setExtraLogRoots(
     db,
     getExtraLogRoots(db).filter((root) => !samePath(root, target)),
@@ -557,7 +582,7 @@ async function confirm(message: string, detail: string, yes: string, no: string)
 }
 
 async function rebuildDatabase(): Promise<ActionResult> {
-  requireDatabase();
+  requireWritableDatabase();
   const t = en.dialogs.rebuild;
   if (!(await confirm(t.message, t.detail, t.confirm, t.cancel))) return { status: 'cancelled' };
   await scanUsage((db) => db.resetFileStates());
@@ -566,8 +591,9 @@ async function rebuildDatabase(): Promise<ActionResult> {
 
 async function keepHistoryLonger(input: unknown): Promise<ActionResult> {
   const days = parseCleanupDays(input);
+  requireWritableDatabase();
   const t = en.dialogs.keepLonger;
-  const file = claudeSettingsFile();
+  const file = claudeSettings();
   const state = readRetention(file);
   if (!state.readable) {
     await showMessage({ type: 'info', message: t.unreadable(tildify(file), days) });
@@ -767,16 +793,29 @@ function registerIpc(): void {
   handle<SettingsData>(IPC.useSyncFolder, (_event, folder) => useSyncFolder(folder));
   handle<void>(IPC.syncNow, () => sync.syncNow());
   handle<ActionResult>(IPC.removeMachine, (_event, id) => removeMachine(id));
-  handle<void>(IPC.restoreMachine, (_event, id) => sync.restoreMachine(parseMachineIdArgument(id)));
+  handle<void>(IPC.restoreMachine, (_event, id) => {
+    requireWritableDatabase();
+    return sync.restoreMachine(parseMachineIdArgument(id));
+  });
+}
+
+app.setName(APP_NAME);
+// The data folder is chosen before the single-instance lock, which lives in it: a dev run or
+// a demo run can then be open next to the installed app.
+if (isDemo) {
+  // Demo mode shows sample data and never touches the real history.
+  demo = createDemoEnvironment(currentPlatform());
+  app.setPath('userData', demo.userData);
+} else if (isDev) {
+  // Development runs keep their own data folder, away from the installed app's history.
+  app.setPath('userData', path.join(app.getPath('appData'), `${APP_NAME} (dev)`));
 }
 
 if (!app.requestSingleInstanceLock()) {
+  if (demo) removeDemoEnvironment(demo);
   app.quit();
 } else {
-  app.setName(APP_NAME);
   if (process.platform === 'win32') app.setAppUserModelId(APP_ID);
-  // Development runs keep their own data folder, away from the installed app's history.
-  if (isDev) app.setPath('userData', path.join(app.getPath('appData'), `${APP_NAME} (dev)`));
 
   app.on('second-instance', () => {
     if (!mainWindow) return;
@@ -792,15 +831,15 @@ if (!app.requestSingleInstanceLock()) {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) =>
       callback(false),
     );
     if (!isDev) blockNetwork();
     installAppMenu(isDev);
     registerIpc();
-    // Demo mode shows sample data and never touches the real history.
-    if (!isDemo) openDatabase();
+    if (demo) await startDemo(demo);
+    else openDatabase();
     createWindow();
     void scanUsage();
   });
@@ -816,5 +855,24 @@ if (!app.requestSingleInstanceLock()) {
     void watcher.close();
     database?.close();
     database = null;
+    if (demo) removeDemoEnvironment(demo);
   });
+}
+
+/**
+ * Generates the sample data, opens a database for it in the demo folder and syncs with the
+ * fake second computer. The first scan then reads the sample logs like real ones.
+ */
+async function startDemo(env: DemoEnvironment): Promise<void> {
+  try {
+    const started = performance.now();
+    await generateDemoWorld(env, currentPlatform(), app.getVersion());
+    console.log(`[demo] Sample data generated in ${Math.round(performance.now() - started)} ms`);
+  } catch (error) {
+    console.error('[demo] Could not generate the sample data:', error);
+  }
+  openDatabase();
+  if (!database) return;
+  sync.setFolder(env.syncFolder, true);
+  await sync.setEnabled(true, async () => []);
 }
