@@ -20,7 +20,7 @@ Status of the build plan in [SPEC.md](SPEC.md) §8. Read this first when resumin
 | 11. Packaging, release, demo   | `577d554` + `37fd22d` | `.dmg` + `.exe` config, icons, `release.yml`, demo mode, README screenshots   |
 | 12. Windows testing and fixes  | see `git log`         | Setup + portable `.exe` checked by hand, portable login and sync write fixes  |
 
-CI (lint, typecheck, tests on macOS and Windows) is green up to `9e1c45c`; `release.yml` built the `v0.1.0` draft from `37fd22d`.
+CI (lint, typecheck, tests on macOS and Windows) is green up to `57ade16`. **v0.1.1 is published** (tag on `3dbdd53`, built by `release.yml`); v0.1.0 was never published, its draft and tag are deleted.
 
 ## Decisions and deviations from the spec
 
@@ -227,9 +227,14 @@ The `v0.1.0` draft release (built by `release.yml`: two `.dmg`, setup and portab
 - Detection reads the Windows volume labels with PowerShell (~150 ms, only with ≥ 2 Drive accounts). If that is ever blocked, the list just shows paths.
 - A session's clock time is shown in this machine's zone (see Sync above).
 
-## Release v0.1.1
+## Release v0.1.1 (published 2026-11-13)
 
-The build plan (SPEC §8) is complete. `v0.1.0` was never published (its portable `.exe` has the launch-at-login bug); CHANGELOG keeps its section, marked as such, without a link. `0.1.1` (2026-11-13) is the first published release: version bumped, `v0.1.1` tag pushed, `release.yml` builds the draft. Remaining, in order: the user re-checks the portable `.exe` of the `v0.1.1` draft (launch at login) and publishes the draft; then, **after asking the user**, delete the `v0.1.0` draft and the `v0.1.0` tag (`gh release delete v0.1.0 --cleanup-tag`).
+The build plan (SPEC §8) is complete.
+
+- `v0.1.0` was never published (its portable `.exe` has the launch-at-login bug); its draft and tag are deleted. CHANGELOG keeps its section, marked "never published", without a link reference. The 0.1.1 notes link to the changelog for the full feature list, because the release notes hold only their own section (`scripts/changelog-section.mjs`).
+- `v0.1.1`: version bumped in `package.json` and the lockfile, tag pushed; CI and `release.yml` green on both platforms at the first try (no macOS runner shortage); the draft had the two `.dmg`, both `.exe` and `SHA256SUMS.txt`, and was published by the user.
+- Checked on the release files: the setup `.exe` updates an installed 0.1.0 in place (uninstall entry and `.exe` say 0.1.1; data, settings and the launch-at-login entry kept; the app started after a restart). The downloaded portable `.exe` (SHA-256 matches `SHA256SUMS.txt`), run with a scratch `--user-data-dir` over CDP, registers itself (`Downloads\Token-Tracker-0.1.1-win-x64-portable.exe`) and reads the switch back as on; the installed app's entry was put back afterwards.
+- Next releases: add a `## [x.y.z]` section, bump the version, tag `vx.y.z`; re-run a macOS job when GitHub cancels it for lack of a runner.
 
 Driving the built app without a human: start it with `--user-data-dir=<scratch>` and `--remote-debugging-port=NNNN` (or `--demo`, which needs neither a fake home nor a scratch folder), then use CDP (`Runtime.evaluate` on `window.api.*`, `Emulation.setDeviceMetricsOverride`, `Page.captureScreenshot`). The router is a `HashRouter`: navigate with `location.hash = '#/projects'`, never `history.pushState` (that moves the page off `index.html` and the IPC guard then refuses every call). The page scrolls inside `.main`: take its `scrollHeight` (+ 44 px title bar) for full-page captures. **Never** run `electron .` without `--demo` or `--user-data-dir`: it writes into the installed app's data folder. **Never** pick `G:\` / `H:\` (the user's real Drive accounts) in such a run.
 Run tests from PowerShell: under Git Bash, vitest loads twice (drive letter case) and fails with "failed to find the current suite". Bash heredocs that contain quotes also fail in this shell: write files with the editor tools instead.
