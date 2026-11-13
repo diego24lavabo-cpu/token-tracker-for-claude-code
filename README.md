@@ -72,7 +72,7 @@ Only the usage numbers of each response are read (token counts, model, timestamp
 - **A project is the folder where the session was started.** If the shell moves into a subfolder during a session, the usage stays with the project.
 - **Days and hours follow your system time zone.** Timestamps are stored in UTC.
 - **Durations are active time.** The time between consecutive responses is added up, leaving out any pause longer than 30 minutes, so a session resumed the next day does not count as a day of work.
-- **Cost is an estimate at API prices.** Each model's tokens are multiplied by the prices in an editable `pricing.json` in the app's data folder; writes to the 1-hour cache are priced at their own, higher rate. On a subscription this is only what the same usage would cost if billed per token. A model without a price shows no cost.
+- **Cost is an estimate at API prices.** Each model's tokens are multiplied by the prices in an editable `pricing.json` in the app's data folder; writes to the 1-hour cache are priced at their own, higher rate. On a subscription this is only what the same usage would cost if billed per token. A model without a price shows no cost. Estimate at standard API prices. Not included: fast mode, US-only inference, web searches, Haiku long-prompt pricing.
 - **History is permanent.** Claude Code deletes old transcripts (after 30 days by default). The app copies the usage numbers into its own database and never removes them when a source file disappears.
 
 ## How sync works

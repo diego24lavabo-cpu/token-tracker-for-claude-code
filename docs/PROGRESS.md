@@ -235,5 +235,14 @@ The build plan (SPEC §8) is complete.
 - Checked on the release files: the setup `.exe` updates an installed 0.1.0 in place (uninstall entry and `.exe` say 0.1.1; data, settings and the launch-at-login entry kept; the app started after a restart). The downloaded portable `.exe` (SHA-256 matches `SHA256SUMS.txt`), run with a scratch `--user-data-dir` over CDP, registers itself (`Downloads\Token-Tracker-0.1.1-win-x64-portable.exe`) and reads the switch back as on; the installed app's entry was put back afterwards.
 - Next releases: add a `## [x.y.z]` section, bump the version, tag `vx.y.z`; re-run a macOS job when GitHub cancels it for lack of a runner.
 
+## 0.1.2 pending (not released)
+
+On `main`, in CHANGELOG's Unreleased section, no tag yet (the user decides when):
+
+- Default prices verified on 2026-11-13 (unchanged) and new defaults for Opus 4.5 and Sonnet 4.5 (`ebf50fb`).
+- The Overview's "Estimated cost" card has a tooltip (`overview.kpi.costTitle`), and the README's cost paragraph a line: "Estimate at standard API prices. Not included: fast mode, US-only inference, web searches, Haiku long-prompt pricing."
+
+To release: turn Unreleased into `## [0.1.2] - <day>` with its link reference (`[0.1.2]: …/releases/tag/v0.1.2`, Unreleased compares `v0.1.2...HEAD`), bump the version (`npm version 0.1.2 --no-git-tag-version`), push `main`, tag `v0.1.2`, check the draft, publish.
+
 Driving the built app without a human: start it with `--user-data-dir=<scratch>` and `--remote-debugging-port=NNNN` (or `--demo`, which needs neither a fake home nor a scratch folder), then use CDP (`Runtime.evaluate` on `window.api.*`, `Emulation.setDeviceMetricsOverride`, `Page.captureScreenshot`). The router is a `HashRouter`: navigate with `location.hash = '#/projects'`, never `history.pushState` (that moves the page off `index.html` and the IPC guard then refuses every call). The page scrolls inside `.main`: take its `scrollHeight` (+ 44 px title bar) for full-page captures. **Never** run `electron .` without `--demo` or `--user-data-dir`: it writes into the installed app's data folder. **Never** pick `G:\` / `H:\` (the user's real Drive accounts) in such a run.
 Run tests from PowerShell: under Git Bash, vitest loads twice (drive letter case) and fails with "failed to find the current suite". Bash heredocs that contain quotes also fail in this shell: write files with the editor tools instead.

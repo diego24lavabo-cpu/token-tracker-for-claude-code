@@ -100,7 +100,12 @@ function KpiRow({ data }: { data: OverviewData | null }) {
         value={kpis ? formatTokens(kpis.outputTokens) : NO_VALUE}
         hint={`${share(kpis?.outputTokens ?? 0)} · ${t.kpi.outputHint}`}
       />
-      <KpiCard label={t.kpi.cost} value={kpis ? formatCost(kpis.cost) : NO_VALUE} hint={costHint} />
+      <KpiCard
+        label={t.kpi.cost}
+        value={kpis ? formatCost(kpis.cost) : NO_VALUE}
+        hint={costHint}
+        title={t.kpi.costTitle}
+      />
     </div>
   );
 }

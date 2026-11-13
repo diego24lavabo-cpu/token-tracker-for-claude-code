@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - Default prices for Opus 4.5 and Sonnet 4.5, which can still appear in Claude Code transcripts.
+- A tooltip on the Overview's estimated cost, and a line in the README, saying what the estimate leaves out: fast mode, US-only inference, web searches and Haiku long-prompt pricing.
 
 ### Changed
 
