@@ -30,16 +30,16 @@ function prices(input: number, output: number, cacheRead = input * CACHE_READ_RA
 }
 
 /**
- * Default prices in US dollars per million tokens, from Anthropic's first-party API price
- * list as of 2026-11-03.
+ * Default prices in US dollars per million tokens: Anthropic's first-party API, standard
+ * speed, checked on 2026-11-13 at https://platform.claude.com/docs/en/about-claude/pricing.
  *
- * TODO: Verify current prices at https://www.anthropic.com/pricing before release.
- *
- * Notes: Haiku 5.5 is priced for prompts up to 100K tokens (longer prompts cost more), and
- * its cache read price is the standard tenth of the input price, not a listed figure.
+ * Not modelled: Haiku 5.5 requests whose prompt (cache reads and writes included) is over
+ * 100K tokens cost 5 times more on every token type; fast mode (`usage.speed: "fast"`)
+ * costs 2 times more; US-only inference (`usage.inference_geo: "us"`) 1.1 times more;
+ * web searches cost $10 per 1,000. Cloud platforms set their own prices.
  */
 export const DEFAULT_PRICING: Pricing = {
-  lastChecked: '2026-11-03',
+  lastChecked: '2026-11-13',
   models: {
     'Fable 5.2': prices(8, 40, 0.2),
     'Mythos 5.2': prices(8, 40, 0.2),
@@ -52,9 +52,11 @@ export const DEFAULT_PRICING: Pricing = {
     'Opus 4.8': prices(5, 25),
     'Opus 4.7': prices(5, 25),
     'Opus 4.6': prices(5, 25),
+    'Opus 4.5': prices(5, 25),
     'Sonnet 5.5': prices(2, 10, 0.1),
     'Sonnet 5': prices(2, 10),
     'Sonnet 4.6': prices(3, 15),
+    'Sonnet 4.5': prices(3, 15),
     'Haiku 5.5': prices(0.1, 0.5),
     'Haiku 4.5': prices(1, 5),
   },

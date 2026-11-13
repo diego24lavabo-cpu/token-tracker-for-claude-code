@@ -55,7 +55,7 @@ CI (lint, typecheck, tests on macOS and Windows) is green up to `57ade16`. **v0.
 **Numbers**
 
 - Durations are active time: the sum of gaps between consecutive responses, leaving out any gap over 30 minutes. A session's gaps run across all its responses, subagents included. The first-to-last span is stored too and is shown only in the session drawer (step 7).
-- 1-hour cache writes are stored separately (`cache_write_1h`, part of `cache_write`) and priced at 2× input instead of 1.25×. `pricing.json` has five prices per model. Defaults come from Anthropic's price list cached on 2026-11-03, with a TODO to verify. Haiku 5.5's cache-read price is derived, and its price for prompts over 100K tokens is not modelled.
+- 1-hour cache writes are stored separately (`cache_write_1h`, part of `cache_write`) and priced at 2× input instead of 1.25×. `pricing.json` has five prices per model. Defaults **verified on 2026-11-13** against the official pricing page (`platform.claude.com/docs/en/about-claude/pricing`) by a research subagent: all 14 models matched, Haiku 5.5's 0.01 cache read is a listed price; Opus 4.5 and Sonnet 4.5 (still on the API) were added. Not modelled, documented in `pricing.ts`: Haiku 5.5 requests with a prompt over 100K tokens (5× on every token type), fast mode (2×), US-only inference (1.1×), web searches ($10 / 1,000). This PC's transcripts have none of them (all `speed: standard`, `inference_geo: global`, 0 web searches). Users' existing `pricing.json` keep their own `lastChecked`; new default models are added to it automatically (`parsePricing`).
 - Period comparison: "New activity" when the period before had under 5% of the current usage, otherwise a signed percentage.
 - The Machines shortcut card ignores the machine filter.
 - The streak counts back from today; when today has no usage yet, from yesterday.
@@ -214,15 +214,14 @@ The `v0.1.0` draft release (built by `release.yml`: two `.dmg`, setup and portab
 
 - The container flags, file watching switch and added folders are per database: the dev database and the installed app's each keep their own (set them in Settings).
 - The first real subagent transcript on this PC (an Explore run, 2026-11-11) shows up in the Projects panel under TTfCC and on the Agents page. Workflow, `/btw`, warm-up and legacy inline agents are still verified only on synthetic data.
-- Not checked yet by a human: the macOS title bar (traffic lights). The Windows buttons were checked in step 12.
-- Prices must be verified before release.
-- Launch at login: checked on Windows (installed and portable, step 12); still to check on the Mac with the installed `.dmg` build.
+- The installed app on the Mac: the user reports it runs without any problem (2026-11-13, after the v0.1.1 release); the Windows buttons were checked in step 12.
+- Launch at login: checked on Windows (installed and portable, step 12); on the Mac only covered by the user's general "runs without any problem", not checked item by item.
 - chokidar 4 uses one `fs.watch` per folder. Fine for this PC's history; re-check the startup time and handle count with ~500 session folders (SPEC §9).
 - `getSessions` loads every session of the range to sort and page them in JS. Instant on this PC's history (a few dozen sessions); re-check with years of data, `1y` on a heavy user. `getAgents` does the same with the period's subagent runs.
 
 **Sync — open points**
 
-- **The real Mac test is still to do** (instructions given to the user at the end of step 10). Things only a real Mac shows: the CloudStorage path and its account name, Drive's handling of the `.tmp` + rename (Drive for desktop may upload the temporary file before the rename; harmless, the reader ignores `.tmp`), how quickly files arrive, and the macOS title bar.
+- **Real Mac + PC sync works** (step 12): the Mac's installed app (`f4627a72…`, "MacBook") and this PC's write to `G:\Mon Drive\ClaudeTokenTracker` and read each other; the Machines page shows both. Drive's handling of the `.tmp` + rename caused no problem (no stray files on Drive).
 - Writes use synchronous `fs` on the main thread (also on quit). Fine for files of a few hundred KB; re-check if a year file grows towards MB on a slow Drive mount.
 - Detection reads the Windows volume labels with PowerShell (~150 ms, only with ≥ 2 Drive accounts). If that is ever blocked, the list just shows paths.
 - A session's clock time is shown in this machine's zone (see Sync above).

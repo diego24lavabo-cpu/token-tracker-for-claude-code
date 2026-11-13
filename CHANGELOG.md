@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Default prices for Opus 4.5 and Sonnet 4.5, which can still appear in Claude Code transcripts.
+
+### Changed
+
+- The default prices were checked against Anthropic's price list on 2026-11-13 (unchanged).
+
 ## [0.1.1] - 2026-11-13
 
 First published release: everything listed under 0.1.0 in the [changelog](https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code/blob/main/CHANGELOG.md), plus these fixes. The builds are not code-signed yet: see the README for how to open them the first time on macOS and Windows.

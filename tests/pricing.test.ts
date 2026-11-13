@@ -9,6 +9,7 @@ import {
   PRICING_FILE,
   savePricing,
 } from '../electron/pricing';
+import { modelDisplayName } from '../electron/parser';
 import type { Pricing } from '../shared/types';
 import { cleanupTempDirs, tempDir } from './helpers';
 
@@ -93,6 +94,30 @@ describe('default prices', () => {
       expect(prices.output, model).toBeGreaterThan(prices.input);
       expect(prices.cacheRead, model).toBeLessThan(prices.input);
     }
+  });
+
+  it('cover the model ids Claude Code can log, by their display name', () => {
+    const ids = [
+      'claude-fable-5-2',
+      'claude-mythos-5-2',
+      'claude-opus-5-5',
+      'claude-sonnet-5-5',
+      'claude-haiku-5-5',
+      'claude-opus-4-5-20251101',
+      'claude-sonnet-4-5-20250929',
+      'claude-sonnet-4-5',
+      'claude-haiku-4-5-20251001',
+    ];
+    for (const id of ids) {
+      expect(Object.hasOwn(DEFAULT_PRICING.models, modelDisplayName(id)), id).toBe(true);
+    }
+    expect(DEFAULT_PRICING.models['Sonnet 4.5']).toEqual({
+      input: 3,
+      output: 15,
+      cacheWrite: 3.75,
+      cacheWrite1h: 6,
+      cacheRead: 0.3,
+    });
   });
 });
 
