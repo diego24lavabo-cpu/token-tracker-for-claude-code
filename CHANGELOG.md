@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-13
+
+First published release: everything listed under 0.1.0 below, plus these fixes. The builds are not code-signed yet: see the README for how to open them the first time on macOS and Windows.
+
 ### Fixed
 
 - Windows portable `.exe`: "Launch at login" registered the temporary copy the portable app runs from, which is deleted when it quits, so nothing started at the next sign-in (and the installed app's entry was replaced). It now registers the portable `.exe` itself.
@@ -13,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [0.1.0] - 2026-11-13
 
-First release. The builds are not code-signed yet: see the README for how to open them the first time on macOS and Windows.
+Built and tested, but never published (replaced by 0.1.1). The builds are not code-signed yet: see the README for how to open them the first time on macOS and Windows.
 
 ### Added
 
@@ -44,5 +48,5 @@ First release. The builds are not code-signed yet: see the README for how to ope
 - "No logs found" state with a folder picker.
 - Repository files: license, contribution guide, security policy, issue and pull request templates, CI workflow.
 
-[Unreleased]: https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code/releases/tag/v0.1.0
+[Unreleased]: https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code/releases/tag/v0.1.1

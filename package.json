@@ -1,7 +1,7 @@
 {
   "name": "token-tracker-for-claude-code",
   "productName": "Token Tracker for Claude Code",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local dashboard of your Claude Code token usage, for macOS and Windows.",
   "license": "MIT",
   "author": "Diego Pacchiani",
