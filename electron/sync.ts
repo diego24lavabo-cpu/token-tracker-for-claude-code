@@ -40,6 +40,8 @@ import {
   parseYearFile,
   README_FILE,
   README_TEXT,
+  README_VERSION,
+  readmeVersion,
   recordsFromYearFiles,
   serializeDeletionsFile,
   serializeMachineFile,
@@ -133,6 +135,22 @@ export function writeAtomic(target: string, data: string | Buffer): void {
       throw error;
     }
   }
+}
+
+/**
+ * Writes `README.txt` when it is missing or older than this app's text (its version
+ * marker), so existing folders get the current wording. A newer README is left alone.
+ */
+export function writeReadme(folder: string): void {
+  const readme = path.join(folder, README_FILE);
+  let current = '';
+  try {
+    current = fs.readFileSync(readme, 'utf8');
+  } catch {
+    // Missing or unreadable: written below.
+  }
+  if (current && readmeVersion(current) >= README_VERSION) return;
+  writeAtomic(readme, README_TEXT.replace(/\n/g, '\r\n'));
 }
 
 function sha1(text: string): string {
@@ -305,8 +323,7 @@ export class SyncService {
     try {
       const machineDir = path.join(folder, MACHINES_FOLDER, db.machineId);
       fs.mkdirSync(machineDir, { recursive: true });
-      const readme = path.join(folder, README_FILE);
-      if (!exists(readme)) fs.writeFileSync(readme, README_TEXT.replace(/\n/g, '\r\n'));
+      writeReadme(folder);
 
       const previous = readWritten(db);
       const written: WrittenState = {

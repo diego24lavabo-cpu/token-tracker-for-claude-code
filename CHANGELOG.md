@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- The `README.txt` in the Google Drive sync folder is rewritten when the app's text for it changes (it now carries a version line), so folders created by an older version get the current explanation. A README written by a newer version on another computer is left alone.
 - The default prices were checked against Anthropic's price list on 2026-11-13 (unchanged).
 - Settings → Sync: "Remove" is now **Hide** (this computer only, can be undone). Its "Remove and delete its files from Drive" choice is gone: use Delete. A folder deleted that way left the machine on the other computers, flagged "not in the sync folder any more".
 

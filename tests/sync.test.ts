@@ -22,13 +22,21 @@ import {
 } from '../electron/aggregate';
 import { UsageDatabase } from '../electron/db';
 import { scanLogs } from '../electron/scanner';
-import { EXPORT_DEBOUNCE_MS, EXPORT_MIN_INTERVAL_MS, SyncService } from '../electron/sync';
+import {
+  EXPORT_DEBOUNCE_MS,
+  EXPORT_MIN_INTERVAL_MS,
+  SyncService,
+  writeReadme,
+} from '../electron/sync';
 import {
   buildYearFiles,
   classifySyncFile,
   parseDeletionsFile,
   parseMachineFile,
   parseYearFile,
+  README_TEXT,
+  README_VERSION,
+  readmeVersion,
   serializeYearFile,
   SYNC_SCHEMA_VERSION,
 } from '../electron/syncFormat';
@@ -147,6 +155,31 @@ describe('two machines through a sync folder', () => {
       appVersion: '0.1.0',
       years: [2026],
     });
+  });
+
+  it('rewrites an outdated README, and never one from a newer app', () => {
+    const folder = tempDir();
+    const readme = path.join(folder, 'README.txt');
+    const read = () => fs.readFileSync(readme, 'utf8');
+
+    writeReadme(folder);
+    expect(read()).toBe(README_TEXT.replace(/\n/g, '\r\n'));
+    expect(readmeVersion(read())).toBe(README_VERSION);
+
+    // The first README had no marker: it is replaced.
+    fs.writeFileSync(readme, 'Token Tracker for Claude Code - sync folder\r\n\r\nOld text.\r\n');
+    writeReadme(folder);
+    expect(readmeVersion(read())).toBe(README_VERSION);
+
+    // An older marker is replaced too; a newer one is kept as it is.
+    fs.writeFileSync(readme, `Old.\r\nREADME version: ${README_VERSION - 1}\r\n`);
+    writeReadme(folder);
+    expect(read()).toBe(README_TEXT.replace(/\n/g, '\r\n'));
+    const newer = `Newer.\r\nREADME version: ${README_VERSION + 1}\r\n`;
+    fs.writeFileSync(readme, newer);
+    writeReadme(folder);
+    expect(read()).toBe(newer);
+    expect(fs.readdirSync(folder)).toEqual(['README.txt']);
   });
 
   it('never writes text, descriptions or paths', async () => {

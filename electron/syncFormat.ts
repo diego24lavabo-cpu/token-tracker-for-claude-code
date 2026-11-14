@@ -245,7 +245,20 @@ export function serializeDeletionsFile(file: DeletionsFile): string {
   return `${JSON.stringify(file, null, 2)}\n`;
 }
 
-/** The short explanation written once at the top of the sync folder. */
+/**
+ * Version of `README_TEXT`. Bump it whenever the text changes: a README with no marker or
+ * an older one is rewritten, a newer one (from a newer app on another computer) is kept.
+ */
+export const README_VERSION = 2;
+const README_MARKER = 'README version:';
+
+/** The version marker of a README's text, or 0 when it has none. */
+export function readmeVersion(text: string): number {
+  const match = /README version:\s*(\d+)/.exec(text);
+  return match ? Number(match[1]) : 0;
+}
+
+/** The short explanation at the top of the sync folder, kept up to date by the app. */
 export const README_TEXT = `Token Tracker for Claude Code - sync folder
 
 This folder lets Token Tracker for Claude Code show the combined Claude Code usage of
@@ -263,6 +276,8 @@ session and agent ids. Never prompts, responses, code, subagent descriptions or 
 To remove an old computer everywhere, delete it in the app's Settings > Sync rather than
 deleting its folder by hand: the other computers keep the numbers of a folder that just
 disappears. A deleted computer comes back if it syncs again.
+
+${README_MARKER} ${README_VERSION} (the app rewrites this file when its text changes)
 `;
 
 // ── File names ────────────────────────────────────────────────────────────────

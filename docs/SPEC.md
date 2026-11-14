@@ -346,7 +346,7 @@ ClaudeTokenTracker/
 │  │  ├─ 2026.json         # aggregates for that year
 │  │  └─ 2027.json
 │  └─ <otherMachineId>/…
-└─ README.txt              # short explanation, written once
+└─ README.txt              # short explanation, rewritten when its version line is older
 ```
 
 - `machineId` = a random UUID created on first launch and stored locally. `name` is editable in Settings (default: the hostname).
