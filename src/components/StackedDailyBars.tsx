@@ -1,7 +1,14 @@
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { DailyPoint } from '../../shared/types';
-import { en } from '../i18n/en';
-import { AXIS_TICK, BAR_CURSOR, CHART_COLORS, niceCeil, tickIndexes } from '../lib/chart';
+import { strings } from '../i18n';
+import {
+  AXIS_TICK,
+  BAR_CURSOR,
+  CHART_COLORS,
+  niceCeil,
+  rightMarginFor,
+  tickIndexes,
+} from '../lib/chart';
 import { formatDay, formatPercent, formatTokens, formatTokensAxis } from '../lib/format';
 import { ChartTooltip, TooltipRow } from './ChartTooltip';
 const X_LABELS = 6;
@@ -17,16 +24,14 @@ export function StackedDailyBars({ data, today }: StackedDailyBarsProps) {
   const peak = data.reduce((max, point) => Math.max(max, point.input + point.output), 0);
   const top = niceCeil(peak);
   const labeledDays = tickIndexes(data.length, X_LABELS).flatMap((index) => data[index]?.day ?? []);
-  const dayLabel = (day: string) => (day === today ? en.overview.daily.today : formatDay(day));
+  const dayLabel = (day: string) => (day === today ? strings.overview.daily.today : formatDay(day));
+  const lastDay = labeledDays.at(-1);
+  const right = rightMarginFor(lastDay ? dayLabel(lastDay) : '');
 
   return (
-    <div className="chart" role="img" aria-label={en.overview.daily.chartLabel}>
+    <div className="chart" role="img" aria-label={strings.overview.daily.chartLabel}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart
-          data={data}
-          margin={{ top: 8, right: 22, bottom: 0, left: 0 }}
-          barCategoryGap="18%"
-        >
+        <BarChart data={data} margin={{ top: 8, right, bottom: 0, left: 0 }} barCategoryGap="18%">
           <XAxis
             dataKey="day"
             ticks={labeledDays}
@@ -80,19 +85,19 @@ function DayTooltip({ active, payload }: DayTooltipProps) {
 
   return (
     <ChartTooltip title={formatDay(point.day, { year: true })}>
-      <TooltipRow label={en.overview.daily.total} value={formatTokens(total)} strong />
+      <TooltipRow label={strings.overview.daily.total} value={formatTokens(total)} strong />
       <TooltipRow
-        label={en.overview.daily.input}
+        label={strings.overview.daily.input}
         value={formatTokens(point.input)}
         swatch="input"
       />
       <TooltipRow
-        label={en.overview.daily.output}
+        label={strings.overview.daily.output}
         value={formatTokens(point.output)}
         swatch="output"
       />
       <TooltipRow
-        label={en.overview.daily.subagents}
+        label={strings.overview.daily.subagents}
         value={total > 0 ? formatPercent(point.subagent / total) : formatPercent(0)}
       />
     </ChartTooltip>

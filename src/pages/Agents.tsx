@@ -19,7 +19,7 @@ import { SessionDrawer } from '../components/SessionDrawer';
 import { useRangeFilters } from '../hooks/useRangeFilters';
 import { useToday } from '../hooks/useToday';
 import { useUsageQuery } from '../hooks/useUsageQuery';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import { agentKindName, agentRunLabel, agentTypeLabel } from '../lib/agents';
 import { seriesColor } from '../lib/chart';
 import {
@@ -34,7 +34,7 @@ import {
 import { useAppData } from '../state/appData';
 
 const NO_VALUE = '—';
-const t = en.agents;
+const t = strings.agents;
 
 /** The session of a top-10 row, shown in the drawer. */
 interface OpenSession {
@@ -76,8 +76,8 @@ export function Agents() {
       <Page section="agents">
         <EmptyState
           icon={<FolderSearch size={22} strokeWidth={1.75} />}
-          title={en.overview.empty.title}
-          body={en.overview.empty.body(
+          title={strings.overview.empty.title}
+          body={strings.overview.empty.body(
             info?.logRoots[0] ?? info?.defaultLogRoot ?? '~/.claude/projects',
           )}
         />

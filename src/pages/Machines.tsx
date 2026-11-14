@@ -11,12 +11,12 @@ import { ProjectMachineBars } from '../components/ProjectMachineBars';
 import { useNow } from '../hooks/useNow';
 import { useRangeFilters } from '../hooks/useRangeFilters';
 import { useUsageQuery } from '../hooks/useUsageQuery';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import { machineColor } from '../lib/chart';
 import { formatCost, formatInt, formatPercent, formatTimeAgo, formatTokens } from '../lib/format';
 import { useAppData } from '../state/appData';
 
-const t = en.machines;
+const t = strings.machines;
 
 export function Machines() {
   const range = useRangeFilters();
@@ -108,7 +108,7 @@ function MachineCard({
           <h2 className="card-title">{card.name}</h2>
         </span>
         <span className="settings-hint">
-          {en.platforms[card.platform]}
+          {strings.platforms[card.platform]}
           {card.isLocal && ` · ${t.thisMachine}`}
         </span>
       </header>

@@ -1,7 +1,14 @@
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { MainSubagentPoint } from '../../shared/types';
-import { en } from '../i18n/en';
-import { AXIS_TICK, BAR_CURSOR, CHART_COLORS, niceCeil, tickIndexes } from '../lib/chart';
+import { strings } from '../i18n';
+import {
+  AXIS_TICK,
+  BAR_CURSOR,
+  CHART_COLORS,
+  niceCeil,
+  rightMarginFor,
+  tickIndexes,
+} from '../lib/chart';
 import { formatDay, formatPercent, formatTokens, formatTokensAxis } from '../lib/format';
 import { ChartTooltip, TooltipRow } from './ChartTooltip';
 
@@ -20,16 +27,14 @@ export function MainSubagentBars({ data, today, label }: MainSubagentBarsProps) 
   const peak = data.reduce((max, point) => Math.max(max, point.main + point.subagent), 0);
   const top = niceCeil(peak);
   const labeledDays = tickIndexes(data.length, X_LABELS).flatMap((index) => data[index]?.day ?? []);
-  const dayLabel = (day: string) => (day === today ? en.dates.today : formatDay(day));
+  const dayLabel = (day: string) => (day === today ? strings.dates.today : formatDay(day));
+  const lastDay = labeledDays.at(-1);
+  const right = rightMarginFor(lastDay ? dayLabel(lastDay) : '');
 
   return (
     <div className="chart" role="img" aria-label={label}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart
-          data={data}
-          margin={{ top: 8, right: 22, bottom: 0, left: 0 }}
-          barCategoryGap="18%"
-        >
+        <BarChart data={data} margin={{ top: 8, right, bottom: 0, left: 0 }} barCategoryGap="18%">
           <XAxis
             dataKey="day"
             ticks={labeledDays}
@@ -80,7 +85,7 @@ function DayTooltip({ active, payload }: DayTooltipProps) {
   const point = payload?.[0]?.payload;
   if (!active || !point) return null;
   const total = point.main + point.subagent;
-  const t = en.charts;
+  const t = strings.charts;
 
   return (
     <ChartTooltip title={formatDay(point.day, { year: true })}>

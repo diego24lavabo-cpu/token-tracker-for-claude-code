@@ -21,6 +21,7 @@ Everything runs locally. No account, no API key, no telemetry, no network calls.
 - **Machines**: combined usage of several computers, synced through your own Google Drive folder.
 - **Permanent history**: the app keeps its own local database, so your history survives Claude Code's transcript cleanup.
 - **CSV export** and an editable price table for the cost estimate.
+- **English or French**, switched in Settings without a restart (by default, the system language).
 
 | Projects                                                                     | Calendar                                                                                    |
 | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |

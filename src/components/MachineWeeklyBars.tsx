@@ -1,6 +1,6 @@
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { WeeklyShare } from '../../shared/types';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import { AXIS_TICK, BAR_CURSOR, CHART_COLORS, niceCeil } from '../lib/chart';
 import { formatDay, formatPercent, formatTokens, formatTokensAxis } from '../lib/format';
 import { ChartTooltip, TooltipRow } from './ChartTooltip';
@@ -85,8 +85,8 @@ function WeekTooltip({ series, active, payload }: WeekTooltipProps) {
   const total = point.tokens.reduce((sum, value) => sum + value, 0);
 
   return (
-    <ChartTooltip title={en.machines.weekly.weekOf(formatDay(point.week, { year: true }))}>
-      <TooltipRow label={en.charts.total} value={formatTokens(total)} strong />
+    <ChartTooltip title={strings.machines.weekly.weekOf(formatDay(point.week, { year: true }))}>
+      <TooltipRow label={strings.charts.total} value={formatTokens(total)} strong />
       {series.map((machine, index) => {
         const tokens = point.tokens[index] ?? 0;
         return (

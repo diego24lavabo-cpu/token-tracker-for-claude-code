@@ -9,6 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { LANGUAGE_SETTINGS, type LanguageSetting } from '../../shared/language';
 import { aliasProblem } from '../../shared/projects';
 import { staleDays } from '../../shared/sync';
 import type {
@@ -26,7 +27,7 @@ import { Switch } from '../components/Switch';
 import { useNow } from '../hooks/useNow';
 import { useRangeFilters } from '../hooks/useRangeFilters';
 import { useUsageQuery } from '../hooks/useUsageQuery';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import {
   formatBytes,
   formatDateTime,
@@ -36,8 +37,9 @@ import {
   formatTimeAgo,
 } from '../lib/format';
 import { useAppData } from '../state/appData';
+import { useLanguage } from '../state/language';
 
-const t = en.settings;
+const t = strings.settings;
 const NO_VALUE = '—';
 const CSV_KINDS: readonly CsvKind[] = ['daily', 'projects', 'models', 'agentTypes'];
 /** How long a confirmation message stays under its button. */
@@ -362,11 +364,7 @@ function ContainersCard({ data, disabled }: { data: SettingsData | null; disable
                     {item.subfolderCount > item.topSubfolders.length && ', …'}
                   </span>
                   <span className="settings-hint num">
-                    {c.inSubfolders(
-                      item.subfolderShare > 0 && item.subfolderShare < 0.0005
-                        ? '<0.1%'
-                        : formatPercent(item.subfolderShare),
-                    )}
+                    {c.inSubfolders(formatPercent(item.subfolderShare, { nonZero: true }))}
                   </span>
                 </div>
                 <Switch
@@ -399,7 +397,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** `Windows · last sync Nov 3, 2026, 14:05 · 2 days ago`, with any problem after it. */
 function machineDetail(machine: SyncMachine, now: number): string {
   const s = t.sync;
-  const parts: string[] = [en.platforms[machine.platform]];
+  const parts: string[] = [strings.platforms[machine.platform]];
   const lastSync = machine.lastSync;
   if (!lastSync) parts.push(s.neverSynced);
   else {
@@ -849,6 +847,7 @@ function AppCard({ data, disabled }: { data: SettingsData | null; disabled: bool
   return (
     <SettingsCard title={a.title}>
       <div className="settings-rows">
+        <LanguageRow onFailed={() => setStatus(a.actionFailed)} />
         <Row label={a.launchAtLogin} hint={loginReason}>
           <Switch
             label={a.launchAtLogin}
@@ -907,11 +906,52 @@ function AppCard({ data, disabled }: { data: SettingsData | null; disabled: bool
           {a.about}
         </span>
         <p className="settings-hint">
-          {en.app.name}. {a.disclaimer}
+          {strings.app.name}. {a.disclaimer}
         </p>
         <p className="settings-hint">{a.local}</p>
       </div>
     </SettingsCard>
+  );
+}
+
+/** Works in demo mode and without a database too: the language has its own file. */
+function LanguageRow({ onFailed }: { onFailed: () => void }) {
+  const a = t.app;
+  const { info, change } = useLanguage();
+  const [busy, setBusy] = useState(false);
+
+  const pick = async (setting: LanguageSetting) => {
+    setBusy(true);
+    try {
+      await change(setting);
+    } catch (error) {
+      console.error('Could not change the language', error);
+      onFailed();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Row label={a.language} hint={a.languageHint}>
+      <label className="select-field">
+        <span className="visually-hidden">{a.language}</span>
+        <select
+          value={info.setting}
+          disabled={busy}
+          onChange={(event) => void pick(event.target.value as LanguageSetting)}
+        >
+          {LANGUAGE_SETTINGS.map((setting) => (
+            <option key={setting} value={setting}>
+              {setting === 'system'
+                ? a.languages.system(a.languages[info.system])
+                : a.languages[setting]}
+            </option>
+          ))}
+        </select>
+        <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+      </label>
+    </Row>
   );
 }
 

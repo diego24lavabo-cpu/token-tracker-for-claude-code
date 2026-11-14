@@ -1,5 +1,5 @@
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import { AXIS_TICK, BAR_CURSOR, CHART_COLORS, niceCeil } from '../lib/chart';
 import { formatPercent, formatTokens } from '../lib/format';
 import { ChartTooltip, TooltipRow } from './ChartTooltip';
@@ -21,7 +21,7 @@ interface HourBarsProps {
 }
 
 /** Tokens per hour of the day: 24 bars. */
-export function HourBars({ hours, label, shareLabel = en.charts.ofTotal }: HourBarsProps) {
+export function HourBars({ hours, label, shareLabel = strings.charts.ofTotal }: HourBarsProps) {
   const total = hours.reduce((sum, value) => sum + value, 0);
   const data: HourPoint[] = hours.map((tokens, hour) => ({
     hour,
@@ -41,7 +41,7 @@ export function HourBars({ hours, label, shareLabel = en.charts.ofTotal }: HourB
           <XAxis
             dataKey="hour"
             ticks={LABELED_HOURS}
-            tickFormatter={en.charts.hour}
+            tickFormatter={strings.charts.hour}
             tick={AXIS_TICK}
             tickLine={false}
             axisLine={{ stroke: CHART_COLORS.grid }}
@@ -76,8 +76,8 @@ function HourTooltip({ shareLabel, active, payload }: HourTooltipProps) {
   const point = payload?.[0]?.payload;
   if (!active || !point) return null;
   return (
-    <ChartTooltip title={en.charts.hourRange(point.hour)}>
-      <TooltipRow label={en.charts.tokens} value={formatTokens(point.tokens)} strong />
+    <ChartTooltip title={strings.charts.hourRange(point.hour)}>
+      <TooltipRow label={strings.charts.tokens} value={formatTokens(point.tokens)} strong />
       <TooltipRow label={shareLabel} value={formatPercent(point.share)} />
     </ChartTooltip>
   );

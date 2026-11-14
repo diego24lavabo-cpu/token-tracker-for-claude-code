@@ -16,6 +16,7 @@ import {
   writeCleanupDays,
 } from '../electron/claudeSettings';
 import { buildCsvTable, csvFileName, toCsv } from '../electron/csv';
+import { setLanguage } from '../src/i18n';
 import type { UsageDatabase } from '../electron/db';
 import { claudeSettingsFile, logFolderFromPick, samePath } from '../electron/paths';
 import { DEFAULT_PRICING, validatePricing } from '../electron/pricing';
@@ -182,6 +183,19 @@ describe('CSV export', () => {
       byType.map((row) => `${row.type}/${row.kind}`),
     );
     expect(types.header).toHaveLength(types.rows[0]!.length);
+  });
+
+  it('keeps English headers and plain numbers when the UI is in French', async () => {
+    const db = await fixtureDb();
+    const english = toCsv(buildCsvTable('daily', db, PRICING, BOTH_DAYS));
+    setLanguage('fr');
+    try {
+      const french = toCsv(buildCsvTable('daily', db, PRICING, BOTH_DAYS));
+      expect(french).toBe(english);
+      expect(parseCsv(french)[0]?.[0]).toBe('date');
+    } finally {
+      setLanguage('en');
+    }
   });
 
   it('names the files after the export and the period', () => {

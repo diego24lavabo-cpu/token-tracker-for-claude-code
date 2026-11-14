@@ -18,7 +18,7 @@ import { SessionDrawer } from '../components/SessionDrawer';
 import { useRangeFilters } from '../hooks/useRangeFilters';
 import { useToday } from '../hooks/useToday';
 import { useUsageQuery } from '../hooks/useUsageQuery';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import {
   formatCost,
   formatDay,
@@ -31,7 +31,7 @@ import { SESSIONS_DAY_PARAM } from '../routes';
 import { useAppData } from '../state/appData';
 
 const NO_VALUE = '—';
-const t = en.sessions;
+const t = strings.sessions;
 const DEFAULT_SORT: SessionSort = { key: 'start', direction: 'desc' };
 
 /** The session shown in the drawer. */
@@ -103,8 +103,8 @@ export function Sessions() {
       <Page section="sessions" periodIgnored={periodIgnored}>
         <EmptyState
           icon={<FolderSearch size={22} strokeWidth={1.75} />}
-          title={en.overview.empty.title}
-          body={en.overview.empty.body(
+          title={strings.overview.empty.title}
+          body={strings.overview.empty.body(
             info?.logRoots[0] ?? info?.defaultLogRoot ?? '~/.claude/projects',
           )}
         />

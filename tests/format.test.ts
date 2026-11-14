@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { setLanguage } from '../src/i18n';
 import {
+  formatBytes,
   formatCost,
+  formatDecimal,
+  formatPriceInput,
+  formatTimeAgo,
   formatDateTime,
   formatDay,
   formatMonth,
@@ -118,6 +123,13 @@ describe('formatPercent', () => {
     expect(formatPercent(0, { signed: true })).toBe('0%');
   });
 
+  it('never shows 0% for a share that is not zero, on request', () => {
+    expect(formatPercent(0.0002, { nonZero: true })).toBe('<0.1%');
+    expect(formatPercent(0.0002)).toBe('0%');
+    expect(formatPercent(0, { nonZero: true })).toBe('0%');
+    expect(formatPercent(0.0006, { nonZero: true })).toBe('0.1%');
+  });
+
   it('shows a dash when there is nothing to compare with', () => {
     expect(formatPercent(Number.POSITIVE_INFINITY)).toBe('—');
     expect(formatPercent(Number.NaN)).toBe('—');
@@ -144,6 +156,7 @@ describe('formatMonth', () => {
   it('writes a month as its short name', () => {
     expect(formatMonth('2026-11')).toBe('Nov');
     expect(formatMonth('2025-12', { year: true })).toBe('Dec 2025');
+    expect(formatMonth('2026-06', { narrow: true })).toBe('Jun');
     expect(formatMonth('2026-13')).toBe('—');
     expect(formatMonth('2026-11-10')).toBe('—');
   });
@@ -197,5 +210,79 @@ describe('formatDateTime', () => {
 
   it('shows a dash for a value that is not a date', () => {
     expect(formatDateTime('soon')).toBe('—');
+  });
+});
+
+describe('in French', () => {
+  // A narrow no-break space between a number and its unit, a no-break space before `$`.
+  const n = '\u202f';
+  beforeEach(() => setLanguage('fr'));
+  afterEach(() => setLanguage('en'));
+
+  it('writes numbers with a decimal comma and spaced units', () => {
+    expect(formatInt(1234567)).toBe(`1${n}234${n}567`);
+    expect(formatDecimal(1.5)).toBe('1,5');
+    expect(formatTokens(950)).toBe('950');
+    expect(formatTokens(1540)).toBe(`1,5${n}k`);
+    expect(formatTokens(412_300)).toBe(`412${n}k`);
+    expect(formatTokens(12_400_000)).toBe(`12,4${n}M`);
+    expect(formatTokens(1_234_000_000)).toBe(`1,2${n}Md`);
+    expect(formatTokensAxis(50_000_000)).toBe(`50${n}M`);
+    expect(formatTokensAxis(2_500_000)).toBe(`2,5${n}M`);
+    expect(formatTokensK(1_080_000)).toBe(`1${n}080${n}k`);
+  });
+
+  it('puts the dollar sign after the amount', () => {
+    expect(formatCost(7.9)).toBe('7,90\u00a0$');
+    expect(formatCost(1234.5)).toBe(`1${n}235\u00a0$`);
+    expect(formatCost(0.001)).toBe('<0,01\u00a0$');
+    expect(formatCost(null)).toBe('—');
+  });
+
+  it('spaces the percent sign', () => {
+    expect(formatPercent(0.46)).toBe(`46${n}%`);
+    expect(formatPercent(0.032)).toBe(`3,2${n}%`);
+    expect(formatPercent(0.18, { signed: true })).toBe(`+18${n}%`);
+    expect(formatPercent(0.0002, { nonZero: true })).toBe(`<0,1${n}%`);
+  });
+
+  it('writes days the French way', () => {
+    expect(formatDay('2026-11-10')).toBe('10 nov.');
+    expect(formatDay('2026-11-01')).toBe('1er nov.');
+    expect(formatDay('2026-02-09', { year: true })).toBe('9 févr. 2026');
+    expect(formatDay('2026-11-10', { weekday: true })).toBe('mar. 10 nov.');
+    expect(formatMonth('2026-08')).toBe('août');
+    expect(formatMonth('2025-12', { year: true })).toBe('déc. 2025');
+    expect(formatMonth('2026-06', { narrow: true })).toBe('J');
+    expect(formatRelativeDay('2026-11-10', '2026-11-10')).toBe('Aujourd’hui');
+    expect(formatRelativeDay('2026-11-04', '2026-11-10')).toBe('il y a 6 jours');
+    expect(formatDateTime(new Date(2026, 10, 3, 14, 5).toISOString())).toBe('3 nov. 2026 à 14:05');
+  });
+
+  it('writes how long ago, with "le" before a day', () => {
+    const now = new Date(2026, 10, 10, 12, 0).getTime();
+    expect(formatTimeAgo(new Date(now - 4 * 60_000).toISOString(), now)).toBe(`il y a 4${n}min`);
+    expect(formatTimeAgo(new Date(2026, 10, 3, 9, 0).toISOString(), now)).toBe('le 3 nov.');
+  });
+
+  it('writes durations and sizes with French units', () => {
+    expect(formatDuration(36_000)).toBe(`36${n}s`);
+    expect(formatDuration(4.1 * 60_000)).toBe(`4,1${n}min`);
+    expect(formatDuration(83 * 60_000)).toBe(`1${n}h${n}23`);
+    expect(formatDuration(65 * 60_000)).toBe(`1${n}h${n}05`);
+    expect(formatDuration(120 * 60_000)).toBe(`2${n}h`);
+    expect(formatBytes(812)).toBe(`812${n}o`);
+    expect(formatBytes(4.2 * 1024 * 1024)).toBe(`4,2${n}Mo`);
+    expect(formatPriceInput(3.75)).toBe('3,75');
+  });
+
+  it('goes back to English', () => {
+    setLanguage('en');
+    expect(formatTokens(12_400_000)).toBe('12.4M');
+    expect(formatCost(7.9)).toBe('$7.90');
+    expect(formatDay('2026-11-01')).toBe('Nov 1');
+    expect(formatTimeAgo(new Date(2026, 10, 3, 9, 0).toISOString(), Date.now())).not.toMatch(
+      /^le /,
+    );
   });
 });

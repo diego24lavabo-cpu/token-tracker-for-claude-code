@@ -10,6 +10,8 @@ function currentPlatform(): Platform {
 const api: Api = {
   platform: currentPlatform(),
   getAppInfo: () => ipcRenderer.invoke(IPC.getAppInfo),
+  getLanguage: () => ipcRenderer.invoke(IPC.getLanguage),
+  setLanguage: (setting) => ipcRenderer.invoke(IPC.setLanguage, setting),
   getMachines: () => ipcRenderer.invoke(IPC.getMachines),
   getOverview: (filters) => ipcRenderer.invoke(IPC.getOverview, filters),
   getProjects: (filters) => ipcRenderer.invoke(IPC.getProjects, filters),

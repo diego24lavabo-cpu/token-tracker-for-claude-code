@@ -1,10 +1,10 @@
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { Heatmap as HeatmapData, HeatmapDay, HeatLevel } from '../../shared/types';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import { formatDay, formatInt, formatMonth, formatTokens } from '../lib/format';
 import { ChartTooltip, TooltipRow } from './ChartTooltip';
 
-const t = en.calendar.heatmap;
+const t = strings.calendar.heatmap;
 const LEVELS: readonly HeatLevel[] = [0, 1, 2, 3, 4];
 /** Rows that carry a weekday label: Monday, Wednesday, Friday, Sunday. */
 const LABELED_WEEKDAYS = new Set([0, 2, 4, 6]);
@@ -105,7 +105,7 @@ export function Heatmap({ heatmap, today, onOpenDay }: HeatmapProps) {
         ))}
       </div>
       <div className="heatmap-weekdays" aria-hidden="true">
-        {en.dates.weekdays.map((name, index) => (
+        {strings.dates.weekdays.map((name, index) => (
           <span key={name}>{LABELED_WEEKDAYS.has(index) ? name : ''}</span>
         ))}
       </div>

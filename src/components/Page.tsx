@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import type { SectionId } from '../routes';
 import { Header } from './Header';
 
@@ -14,7 +14,7 @@ interface PageProps {
 
 /** Page frame: the shared header for the given section, then the page content. */
 export function Page({ section, periodIgnored, machinesIgnored, children }: PageProps) {
-  const { title, subtitle } = en.pages[section];
+  const { title, subtitle } = strings.pages[section];
   return (
     <div className="page">
       <Header

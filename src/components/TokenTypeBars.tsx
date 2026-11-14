@@ -1,5 +1,5 @@
 import type { TokenBreakdown } from '../../shared/types';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import { formatPercent, formatTokens } from '../lib/format';
 
 export interface TokenTypeItem {
@@ -17,17 +17,14 @@ interface TokenTypeBarsProps {
   label: string;
 }
 
-/** Below this share, a type with tokens would print as 0%. */
-const SMALLEST_SHARE = 0.0005;
-
 /** A share as text, never 0% for a type that has tokens. */
 function shareText(tokens: number, share: number): string {
-  return tokens > 0 && share < SMALLEST_SHARE ? '<0.1%' : formatPercent(share);
+  return formatPercent(share, { nonZero: tokens > 0 });
 }
 
 /** One bar per item, cut by token type: input, output, cache read, cache write. */
 export function TokenTypeBars({ items, label }: TokenTypeBarsProps) {
-  const names = en.models.tokenTypes.types;
+  const names = strings.models.tokenTypes.types;
 
   return (
     <div className="token-types">

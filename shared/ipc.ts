@@ -1,6 +1,8 @@
 /** IPC channel names, shared by the main process and the preload script. */
 export const IPC = {
   getAppInfo: 'app:get-info',
+  getLanguage: 'app:get-language',
+  setLanguage: 'app:set-language',
   getMachines: 'machines:list',
   getOverview: 'usage:overview',
   getProjects: 'usage:projects',

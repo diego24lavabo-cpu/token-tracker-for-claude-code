@@ -2,8 +2,10 @@
  * Types shared by the Electron main process and the React renderer.
  * Every number the UI shows comes from the main process through the `Api` below.
  */
+import type { LanguageInfo, LanguageSetting } from './language';
 import type { ProjectAlias } from './projects';
 
+export type { LanguageInfo, LanguageSetting } from './language';
 export type { ProjectAlias } from './projects';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
@@ -859,6 +861,10 @@ export interface Api {
   /** Available synchronously so the title bar can lay out on first paint. */
   platform: Platform;
   getAppInfo(): Promise<AppInfo>;
+  /** The language setting and the language in use. */
+  getLanguage(): Promise<LanguageInfo>;
+  /** Stores a language setting and applies it to the menu and dialogs at once. */
+  setLanguage(setting: LanguageSetting): Promise<LanguageInfo>;
   getMachines(): Promise<Machine[]>;
   getOverview(filters: Filters): Promise<Overview>;
   getProjects(filters: Filters): Promise<Projects>;

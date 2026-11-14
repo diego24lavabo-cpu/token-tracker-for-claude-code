@@ -11,12 +11,12 @@ import { useNow } from '../hooks/useNow';
 import { useRangeFilters } from '../hooks/useRangeFilters';
 import { useToday } from '../hooks/useToday';
 import { useUsageQuery } from '../hooks/useUsageQuery';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import { formatCost, formatInt, formatPercent, formatTimeAgo, formatTokens } from '../lib/format';
 import { useAppData } from '../state/appData';
 
 const NO_VALUE = '—';
-const t = en.overview;
+const t = strings.overview;
 
 export function Overview() {
   const filters = useRangeFilters();

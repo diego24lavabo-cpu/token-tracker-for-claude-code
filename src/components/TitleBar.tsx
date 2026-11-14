@@ -1,9 +1,9 @@
 import { useNow } from '../hooks/useNow';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import { formatTimeAgo } from '../lib/format';
 import { useAppData } from '../state/appData';
 
-const t = en.titleBar;
+const t = strings.titleBar;
 
 /** Custom title bar. It is the window's drag region; the OS draws its buttons on top of it. */
 export function TitleBar() {
@@ -29,7 +29,7 @@ export function TitleBar() {
 
   return (
     <header className="titlebar">
-      <span className="titlebar-title">{en.app.name}</span>
+      <span className="titlebar-title">{strings.app.name}</span>
       <span className={`titlebar-status titlebar-status--${tone}`} role="status">
         <span className="status-dot" aria-hidden="true" />
         {text}

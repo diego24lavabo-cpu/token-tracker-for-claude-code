@@ -12,8 +12,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { IPC } from '../shared/ipc';
+import {
+  isLanguageSetting,
+  resolveLanguage,
+  type LanguageInfo,
+  type LanguageSetting,
+} from '../shared/language';
 import { localDay } from '../shared/period';
-import { en } from '../src/i18n/en';
+import { setLanguage, strings } from '../src/i18n';
 import { formatDateTime } from '../src/lib/format';
 import type {
   ActionResult,
@@ -80,6 +86,7 @@ import {
 } from './demo';
 import { syncFolderFromPick } from './drive';
 import { installAppMenu } from './menu';
+import { readPreferences, writePreferences } from './preferences';
 import {
   claudeSettingsFile,
   defaultLogRoot,
@@ -396,6 +403,38 @@ async function buildSettings(): Promise<SettingsData> {
   };
 }
 
+/** The system's languages, most preferred first (`fr-CH`, `en-US`…). */
+function systemLanguages(): string[] {
+  const preferred = app.getPreferredSystemLanguages();
+  return preferred.length > 0 ? preferred : [app.getLocale()];
+}
+
+/** Applies a language setting to this process: strings, dates, numbers and the menu. */
+function applyLanguage(setting: LanguageSetting): LanguageInfo {
+  const info = resolveLanguage(setting, systemLanguages());
+  setLanguage(info.language);
+  installAppMenu(isDev);
+  return info;
+}
+
+let languageInfo: LanguageInfo | null = null;
+
+/**
+ * Stores and applies the language chosen in Settings. Allowed in demo mode and without a
+ * database: the preference lives in its own file. The page then renders again by itself.
+ */
+function changeLanguage(input: unknown): LanguageInfo {
+  if (!isLanguageSetting(input)) throw new Error('Unknown language');
+  try {
+    writePreferences(app.getPath('userData'), { language: input });
+  } catch (error) {
+    // Still applied for this run.
+    console.error(`[settings] Could not save the language: ${errorText(error)}`);
+  }
+  languageInfo = applyLanguage(input);
+  return languageInfo;
+}
+
 function requireDatabase(): UsageDatabase {
   if (!database) throw new Error('The usage database is not available');
   return database;
@@ -451,8 +490,8 @@ async function applySettings(input: unknown): Promise<SettingsData> {
 async function chooseSyncFolder(): Promise<ChooseFolderResult> {
   requireWritableDatabase();
   const options: Electron.OpenDialogOptions = {
-    title: en.dialogs.pickSyncFolder.title,
-    buttonLabel: en.dialogs.pickSyncFolder.button,
+    title: strings.dialogs.pickSyncFolder.title,
+    buttonLabel: strings.dialogs.pickSyncFolder.button,
     defaultPath: os.homedir(),
     properties: ['openDirectory', 'createDirectory'],
   };
@@ -489,7 +528,7 @@ async function hideMachine(input: unknown): Promise<ActionResult> {
   const machine = db.listAllMachines().find((item) => item.id === machineId);
   if (!machine || machine.isLocal) return { status: 'cancelled' };
 
-  const t = en.dialogs.hideMachine;
+  const t = strings.dialogs.hideMachine;
   const answer = await showMessage({
     type: 'question',
     message: t.message(machine.name),
@@ -519,7 +558,7 @@ async function deleteMachine(input: unknown): Promise<DeleteMachineResult> {
   const machine = db.listAllMachines().find((item) => item.id === machineId);
   if (!machine || machine.isLocal) return { status: 'cancelled' };
 
-  const t = en.dialogs.deleteMachine;
+  const t = strings.dialogs.deleteMachine;
   const onDrive = sync.hasDriveFolder(machineId);
   const first = await showMessage({
     type: 'warning',
@@ -567,8 +606,8 @@ function withWindow<T>(show: (window?: BrowserWindow) => Promise<T>): Promise<T>
 async function addLogFolder(): Promise<AddFolderResult> {
   const db = requireWritableDatabase();
   const options: Electron.OpenDialogOptions = {
-    title: en.dialogs.pickFolder.title,
-    buttonLabel: en.dialogs.pickFolder.button,
+    title: strings.dialogs.pickFolder.title,
+    buttonLabel: strings.dialogs.pickFolder.button,
     defaultPath: os.homedir(),
     properties: ['openDirectory', 'showHiddenFiles'],
   };
@@ -605,9 +644,9 @@ async function exportCsv(kindInput: unknown, filtersInput: unknown): Promise<Exp
   const db = requireDatabase();
 
   const options: Electron.SaveDialogOptions = {
-    title: en.dialogs.exportCsv.title,
+    title: strings.dialogs.exportCsv.title,
     defaultPath: path.join(app.getPath('downloads'), csvFileName(kind, filters)),
-    filters: [{ name: en.dialogs.exportCsv.filter, extensions: ['csv'] }],
+    filters: [{ name: strings.dialogs.exportCsv.filter, extensions: ['csv'] }],
   };
   const target = await withWindow((window) =>
     window ? dialog.showSaveDialog(window, options) : dialog.showSaveDialog(options),
@@ -646,7 +685,7 @@ async function confirm(message: string, detail: string, yes: string, no: string)
 
 async function rebuildDatabase(): Promise<ActionResult> {
   requireWritableDatabase();
-  const t = en.dialogs.rebuild;
+  const t = strings.dialogs.rebuild;
   if (!(await confirm(t.message, t.detail, t.confirm, t.cancel))) return { status: 'cancelled' };
   await scanUsage((db) => db.resetFileStates());
   return { status: 'done' };
@@ -655,7 +694,7 @@ async function rebuildDatabase(): Promise<ActionResult> {
 async function keepHistoryLonger(input: unknown): Promise<ActionResult> {
   const days = parseCleanupDays(input);
   requireWritableDatabase();
-  const t = en.dialogs.keepLonger;
+  const t = strings.dialogs.keepLonger;
   const file = claudeSettings();
   const state = readRetention(file);
   if (!state.readable) {
@@ -790,6 +829,9 @@ function registerIpc(): void {
     defaultLogRoot: tildify(defaultLogRoot()),
   }));
 
+  handle<LanguageInfo>(IPC.getLanguage, () => languageInfo ?? applyLanguage('system'));
+  handle<LanguageInfo>(IPC.setLanguage, (_event, setting) => changeLanguage(setting));
+
   handle<Machine[]>(IPC.getMachines, () => database?.listMachines() ?? []);
 
   handle<Overview>(IPC.getOverview, (_event, input) => {
@@ -900,7 +942,8 @@ if (!app.requestSingleInstanceLock()) {
       callback(false),
     );
     if (!isDev) blockNetwork();
-    installAppMenu(isDev);
+    // Before the menu and the first dialog: both follow the chosen language.
+    languageInfo = applyLanguage(readPreferences(app.getPath('userData')).language);
     registerIpc();
     if (demo) await startDemo(demo);
     else openDatabase();

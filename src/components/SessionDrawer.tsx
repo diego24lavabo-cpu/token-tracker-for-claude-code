@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import type { SessionDetail, SessionSubagent, TokenBreakdown } from '../../shared/types';
 import { useToday } from '../hooks/useToday';
 import { useUsageQuery } from '../hooks/useUsageQuery';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import { agentKindLabel, agentTypeLabel } from '../lib/agents';
 import {
   formatCost,
@@ -16,7 +16,7 @@ import {
 import { SplitBar } from './SplitBar';
 
 const NO_VALUE = '—';
-const d = en.sessions.drawer;
+const d = strings.sessions.drawer;
 const TOKEN_TYPES = ['input', 'output', 'cacheRead', 'cacheWrite'] as const;
 
 interface SessionDrawerProps {

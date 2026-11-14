@@ -8,13 +8,13 @@ import { TokenTypeBars } from '../components/TokenTypeBars';
 import { WeeklyModelBars, type ModelSeries, type WeeklyMode } from '../components/WeeklyModelBars';
 import { useRangeFilters } from '../hooks/useRangeFilters';
 import { useUsageQuery } from '../hooks/useUsageQuery';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import { seriesColor } from '../lib/chart';
 import { formatCost, formatInt, formatPercent, formatTokens } from '../lib/format';
 import { useAppData } from '../state/appData';
 
 const NO_VALUE = '—';
-const t = en.models;
+const t = strings.models;
 const WEEKLY_MODES: readonly { value: WeeklyMode; label: string }[] = [
   { value: 'tokens', label: t.weekly.modes.tokens },
   { value: 'share', label: t.weekly.modes.share },
@@ -32,8 +32,8 @@ export function Models() {
       <Page section="models">
         <EmptyState
           icon={<FolderSearch size={22} strokeWidth={1.75} />}
-          title={en.overview.empty.title}
-          body={en.overview.empty.body(
+          title={strings.overview.empty.title}
+          body={strings.overview.empty.body(
             info?.logRoots[0] ?? info?.defaultLogRoot ?? '~/.claude/projects',
           )}
         />

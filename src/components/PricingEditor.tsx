@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import type { ModelPrices, Pricing } from '../../shared/types';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import { isDay } from '../../shared/period';
 import { useToday } from '../hooks/useToday';
-import { formatTokens } from '../lib/format';
+import { formatPriceInput, formatTokens } from '../lib/format';
 
-const t = en.settings.pricing;
+const t = strings.settings.pricing;
 
 type Field = keyof ModelPrices;
 const FIELDS: readonly Field[] = ['input', 'output', 'cacheWrite', 'cacheWrite1h', 'cacheRead'];
@@ -35,7 +35,8 @@ interface PricingEditorProps {
 function rowOf(prices: ModelPrices | undefined): DraftRow {
   if (!prices) return { ...EMPTY_ROW };
   const row = { ...EMPTY_ROW };
-  for (const field of FIELDS) row[field] = String(prices[field]);
+  // Shown with the language's decimal separator; `parsePrice` reads both.
+  for (const field of FIELDS) row[field] = formatPriceInput(prices[field]);
   return row;
 }
 
@@ -210,7 +211,7 @@ export function PricingEditor({
           <input
             className="date-input num"
             value={lastChecked}
-            placeholder="YYYY-MM-DD"
+            placeholder={t.datePlaceholder}
             maxLength={10}
             spellCheck={false}
             disabled={disabled}

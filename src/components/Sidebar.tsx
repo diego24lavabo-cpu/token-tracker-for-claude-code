@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import { SECTIONS, type Section } from '../routes';
 import { useAppData } from '../state/appData';
 import { Logo } from './Logo';
@@ -9,10 +9,10 @@ export function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar-brand">
         <Logo />
-        {en.app.shortName}
+        {strings.app.shortName}
       </div>
 
-      <nav className="sidebar-nav" aria-label={en.nav.label}>
+      <nav className="sidebar-nav" aria-label={strings.nav.label}>
         {SECTIONS.map((section) => (
           <NavItem key={section.id} id={section.id} path={section.path} />
         ))}
@@ -28,7 +28,7 @@ function NavItem({ id, path }: Section) {
     <>
       {id === 'settings' && <div className="sidebar-nav-separator" aria-hidden="true" />}
       <NavLink to={path} end={path === '/'} className="nav-item" draggable={false}>
-        {en.nav[id]}
+        {strings.nav[id]}
       </NavLink>
     </>
   );
@@ -42,14 +42,14 @@ function SourceBox() {
   // The sample data of demo mode sits in a temporary folder: its path says nothing.
   const roots = info.demo ? [] : info.logRoots.length > 0 ? info.logRoots : [info.defaultLogRoot];
   const note = info.demo
-    ? en.source.sampleData
+    ? strings.source.sampleData
     : info.logRoots.length === 0
-      ? en.source.notFound
+      ? strings.source.notFound
       : null;
 
   return (
     <div className="sidebar-source">
-      {en.source.label}
+      {strings.source.label}
       {roots.map((root) => (
         <span key={root} className="sidebar-source-path" title={root}>
           {root}

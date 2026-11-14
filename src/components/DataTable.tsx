@@ -1,6 +1,6 @@
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import { sortRows, type SortDirection, type SortValue } from '../lib/sort';
 
 export interface Column<T> {
@@ -117,7 +117,7 @@ export function DataTable<T>({
                       type="button"
                       className={active ? 'data-table-sort is-active' : 'data-table-sort'}
                       onClick={() => toggle(column)}
-                      title={column.description ?? en.table.sortBy(column.header)}
+                      title={column.description ?? strings.table.sortBy(column.header)}
                       aria-description={column.description}
                     >
                       {column.header}

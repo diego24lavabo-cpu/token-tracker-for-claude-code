@@ -1,4 +1,8 @@
-/** Every string the UI shows. Components never hardcode text. */
+/**
+ * Every string the UI shows, in English. Components never hardcode text: they read
+ * `strings` from `./index`, which follows the chosen language. `fr.ts` must have every
+ * key of this file (checked by `tests/i18n.test.ts`).
+ */
 export const en = {
   app: {
     name: 'Token Tracker for Claude Code',
@@ -601,6 +605,34 @@ export const en = {
   },
 
   dates: {
+    months: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+    /** On a narrow chart with one bar per month. */
+    monthsNarrow: [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ],
+    /** `Nov 10`. `month` is one of `months`. */
+    day: (day: number, month: string) => `${month} ${day}`,
+    /** `Nov 10, 2026`. */
+    dayWithYear: (dayLabel: string, year: string) => `${dayLabel}, ${year}`,
+    /** `Tue, Nov 10`. */
+    withWeekday: (weekday: string, dayLabel: string) => `${weekday}, ${dayLabel}`,
+    /** `Nov 2026`. */
+    monthWithYear: (month: string, year: string) => `${month} ${year}`,
+    /** `Nov 3, 2026, 14:05`. */
+    dateTime: (date: string, time: string) => `${date}, ${time}`,
+    /** A day after a word such as "synced": `synced Nov 10` (French: `le 10 nov.`). */
+    onDay: (dayLabel: string) => dayLabel,
     weekdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
     weekdaysLong: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
     today: 'Today',
@@ -616,9 +648,9 @@ export const en = {
   },
 
   settings: {
-    unavailable: 'Settings cannot be changed: the usage database could not be opened.',
+    unavailable: 'Only the language can be changed: the usage database could not be opened.',
     demoMode:
-      'Demo mode: the app shows generated sample data from two fake computers, and nothing can be changed. Your own history, logs and Google Drive are not touched.',
+      'Demo mode: the app shows generated sample data from two fake computers, and nothing but the language can be changed. Your own history, logs and Google Drive are not touched.',
     sources: {
       title: 'Data sources',
       folders: 'Claude Code folders',
@@ -735,6 +767,13 @@ export const en = {
     },
     app: {
       title: 'Application',
+      language: 'Language',
+      languageHint: 'Menus and dialogs too',
+      languages: {
+        system: (language: string) => `System default (${language})`,
+        en: 'English',
+        fr: 'Français',
+      },
       launchAtLogin: 'Launch at login',
       launchUnavailableDev: 'Available in the installed app',
       launchUnavailablePlatform: 'Not available on this system',
@@ -769,6 +808,7 @@ export const en = {
       subtitle: 'US dollars per million tokens, for the cost estimate',
       lastChecked: 'Last checked',
       checkedToday: 'Today',
+      datePlaceholder: 'YYYY-MM-DD',
       invalidDate: 'Write the date as YYYY-MM-DD, for example 2026-11-03.',
       verify: 'Verify the current prices at anthropic.com/pricing.',
       model: 'Model',
@@ -789,6 +829,36 @@ export const en = {
         'Fill in every price of a row with a number from 0 to 10,000, or leave a new model empty.',
       priceLabel: (model: string, field: string) => `${field} price of ${model}`,
     },
+  },
+
+  /** The application menu (shown on macOS; its shortcuts work everywhere). */
+  menu: {
+    about: (app: string) => `About ${app}`,
+    hide: (app: string) => `Hide ${app}`,
+    hideOthers: 'Hide Others',
+    showAll: 'Show All',
+    quit: (app: string) => `Quit ${app}`,
+    file: 'File',
+    close: 'Close Window',
+    exit: 'Exit',
+    edit: 'Edit',
+    undo: 'Undo',
+    redo: 'Redo',
+    cut: 'Cut',
+    copy: 'Copy',
+    paste: 'Paste',
+    selectAll: 'Select All',
+    view: 'View',
+    reload: 'Reload',
+    forceReload: 'Force Reload',
+    devTools: 'Toggle Developer Tools',
+    actualSize: 'Actual Size',
+    zoomIn: 'Zoom In',
+    zoomOut: 'Zoom Out',
+    fullScreen: 'Toggle Full Screen',
+    window: 'Window',
+    minimize: 'Minimize',
+    zoom: 'Zoom',
   },
 
   dialogs: {

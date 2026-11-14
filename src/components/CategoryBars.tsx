@@ -1,7 +1,7 @@
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { AXIS_TICK, BAR_CURSOR, CHART_COLORS, niceCeil } from '../lib/chart';
 import { formatPercent, formatTokens } from '../lib/format';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import { ChartTooltip, TooltipRow } from './ChartTooltip';
 
 export interface CategoryItem {
@@ -35,7 +35,7 @@ export function CategoryBars({
   items,
   label,
   shareLabel,
-  valueLabel = en.charts.tokens,
+  valueLabel = strings.charts.tokens,
   formatValue = formatTokens,
 }: CategoryBarsProps) {
   const total = items.reduce((sum, item) => sum + item.value, 0);

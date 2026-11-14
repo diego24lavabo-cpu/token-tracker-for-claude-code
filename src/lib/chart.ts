@@ -55,6 +55,14 @@ export function machineColor(index: number): string {
 /** Axis labels: small, muted, in the mono face like every number. */
 export const AXIS_TICK = { fill: CHART_COLORS.axis, fontSize: 11, fontFamily: 'var(--font-mono)' };
 
+/**
+ * A right margin that keeps the last axis label, centered on the last bar, inside the
+ * chart: `Aujourd’hui` needs more room than `Today`. About 6.6 px per character at 11 px.
+ */
+export function rightMarginFor(lastLabel: string): number {
+  return Math.max(22, Math.ceil(lastLabel.length * 3.4));
+}
+
 /** The faint band behind the hovered bar. */
 export const BAR_CURSOR = { fill: 'rgba(240, 238, 230, 0.05)' };
 

@@ -1,4 +1,4 @@
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import { useAppData } from '../state/appData';
 import { ALL_MACHINES, useFilters } from '../state/filters';
 import { SegmentedControl } from './SegmentedControl';
@@ -12,7 +12,7 @@ export function MachineSelector({ disabledReason }: { disabledReason?: string })
   const { machineId, setMachineId } = useFilters();
 
   const options = [
-    { value: ALL_MACHINES, label: en.header.allMachines },
+    { value: ALL_MACHINES, label: strings.header.allMachines },
     ...machines.map((machine) => ({ value: machine.id, label: machine.name })),
   ];
   // A machine that disappeared from the list falls back to "All".
@@ -20,7 +20,7 @@ export function MachineSelector({ disabledReason }: { disabledReason?: string })
 
   return (
     <SegmentedControl
-      label={en.header.machineSelector}
+      label={strings.header.machineSelector}
       options={options}
       value={disabledReason ? ALL_MACHINES : selected}
       onChange={setMachineId}

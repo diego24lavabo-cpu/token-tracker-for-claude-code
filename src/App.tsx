@@ -13,6 +13,7 @@ import { Settings } from './pages/Settings';
 import { SECTIONS } from './routes';
 import { AppDataProvider } from './state/AppDataProvider';
 import { FiltersProvider } from './state/FiltersProvider';
+import { useLanguage } from './state/language';
 
 export function App() {
   return (
@@ -28,9 +29,11 @@ export function App() {
 
 function Shell() {
   useSectionShortcuts();
+  // Reading the language makes the whole shell render again when it changes.
+  const { language } = useLanguage().info;
 
   return (
-    <div className="app" data-platform={window.api.platform}>
+    <div className="app" data-platform={window.api.platform} data-language={language}>
       <TitleBar />
       <div className="app-body">
         <Sidebar />

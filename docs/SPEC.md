@@ -2,7 +2,7 @@
 
 > Paste this whole file into Claude Code (or put it in the repo as `docs/SPEC.md` and tell Claude Code: "Read docs/SPEC.md and build the app step by step").
 > This is a **public open-source project on GitHub** from day one — see §2b.
-> UI language: **English**. Code, comments and commit messages: English.
+> UI language: **English**, and **French** since 0.1.2 (Settings → Application → Language). Code, comments and commit messages: English.
 
 > **Visual reference.** Screenshots of the approved mockup are in the project folder **`docs/mockup/`** (one image per section: Overview, Projects, Models, Calendar, Sessions, Agents, Machines, Settings). **Open and study them before writing any UI code**, and match them as closely as possible: layout, spacing, colors, typography, chart styles. The mockup labels are in French; the real app is in English (§9). Where this spec and an image disagree, the spec wins. Mockup numbers are fake sample data: never copy them as values. The mockup images are kept **local only** (`docs/mockup/` is gitignored), so they are not part of the public repo.
 
@@ -447,7 +447,7 @@ token-tracker-for-claude-code/
 ├─ src/
 │  ├─ App.tsx, router
 │  ├─ theme.css          # CSS variables from §4
-│  ├─ i18n/en.ts         # every UI string
+│  ├─ i18n/en.ts, fr.ts  # every UI string, per language (index.ts: the live `strings`)
 │  ├─ components/        # Sidebar, Header, MachineSelector, PeriodSelector, KpiCard, ShortcutCard,
 │  │                     # StackedDailyBars, HBar, Donut, Heatmap, Histogram, DataTable, Drawer, EmptyState
 │  ├─ pages/             # Overview, Projects, Models, Calendar, Sessions, Agents, Machines, Settings
@@ -482,7 +482,7 @@ After each step: tell me which command to run, what I should see, and which effo
 ## 9. Quality bar
 
 - Startup < 2 s with ~500 session files + their subagent files (incremental scan + SQLite).
-- UI in English. Numbers formatted the English way (`12.4M`, `1,080k`, `$7.90`), dates in English (`Nov 10`). All UI strings live in `src/i18n/en.ts`.
+- UI in English or French (Settings → Application → Language; default: the system language when supported, else English). Numbers and dates follow the chosen language, never the system locale: `12.4M`, `1,080k`, `$7.90`, `Nov 10` in English, `12,4 M`, `1 080 k`, `7,90 $`, `10 nov.` in French. All UI strings live in `src/i18n/en.ts` and `src/i18n/fr.ts`, with the same keys (tested). CSV exports keep English headers.
 - Visual result matches `docs/mockup/`.
 - Keyboard accessible: real `<button>`s, focus rings in `--accent`, `aria-label` on icon buttons, contrast ≥ 4.5:1.
 - Landscape first (§5 "Responsive layout"): check every page at 1100, 1440 and 1920 px wide. It must use the horizontal space well and never become a long vertical column on a wide window.

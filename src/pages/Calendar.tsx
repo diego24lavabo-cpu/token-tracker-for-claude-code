@@ -11,14 +11,14 @@ import { KpiCard } from '../components/KpiCard';
 import { Page } from '../components/Page';
 import { useToday } from '../hooks/useToday';
 import { useUsageQuery } from '../hooks/useUsageQuery';
-import { en } from '../i18n/en';
+import { strings } from '../i18n';
 import { formatDay, formatMonth, formatPercent, formatTokens } from '../lib/format';
 import { sessionsOfDay } from '../routes';
 import { useAppData } from '../state/appData';
 import { ALL_MACHINES, useFilters } from '../state/filters';
 
 const NO_VALUE = '—';
-const t = en.calendar;
+const t = strings.calendar;
 
 export function Calendar() {
   const { machineId } = useFilters();
@@ -39,8 +39,8 @@ export function Calendar() {
       <Page section="calendar" periodIgnored={t.periodIgnored}>
         <EmptyState
           icon={<FolderSearch size={22} strokeWidth={1.75} />}
-          title={en.overview.empty.title}
-          body={en.overview.empty.body(
+          title={strings.overview.empty.title}
+          body={strings.overview.empty.body(
             info?.logRoots[0] ?? info?.defaultLogRoot ?? '~/.claude/projects',
           )}
         />
@@ -146,10 +146,10 @@ function streakRange(streak: Streak | null, day: (value: string) => string) {
 function WeekdayCard({ data }: { data: CalendarData | null }) {
   const items: CategoryItem[] = useMemo(
     () =>
-      en.dates.weekdays.map((label, index) => ({
+      strings.dates.weekdays.map((label, index) => ({
         key: label,
         label,
-        title: en.dates.weekdaysLong[index]!,
+        title: strings.dates.weekdaysLong[index]!,
         value: data?.byWeekday[index] ?? 0,
         highlight: index === data?.bestWeekday,
       })),
@@ -166,7 +166,7 @@ function WeekdayCard({ data }: { data: CalendarData | null }) {
             <span className="chart-legend-item">
               <span className="swatch swatch--highlight" aria-hidden="true" />
               {t.weekday.busiest}{' '}
-              <span className="chart-legend-value">{en.dates.weekdaysLong[best]}</span>
+              <span className="chart-legend-value">{strings.dates.weekdaysLong[best]}</span>
             </span>
           </span>
         )}
@@ -185,7 +185,7 @@ function MonthCard({ data }: { data: CalendarData | null }) {
       const title = formatMonth(point.month, { year: true });
       return {
         key: point.month,
-        label: formatMonth(point.month),
+        label: formatMonth(point.month, { narrow: true }),
         title: index === months.length - 1 ? `${title} · ${t.month.soFar}` : title,
         value: point.tokens,
       };
