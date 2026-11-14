@@ -1,4 +1,13 @@
-import { ArrowRight, ChevronDown, FolderPlus, Info, RefreshCw, X } from 'lucide-react';
+import {
+  ArrowRight,
+  ChevronDown,
+  EyeOff,
+  FolderPlus,
+  Info,
+  RefreshCw,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { aliasProblem } from '../../shared/projects';
 import { staleDays } from '../../shared/sync';
@@ -20,6 +29,7 @@ import { useUsageQuery } from '../hooks/useUsageQuery';
 import { en } from '../i18n/en';
 import {
   formatBytes,
+  formatDateTime,
   formatDuration,
   formatInt,
   formatPercent,
@@ -384,15 +394,22 @@ function syncStatusText(status: SyncStatus, now: number): string {
   return status.lastSync ? s.statusSynced(formatTimeAgo(status.lastSync, now)) : s.statusNotYet;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** `Windows · last sync Nov 3, 2026, 14:05 · 2 days ago`, with any problem after it. */
 function machineDetail(machine: SyncMachine, now: number): string {
   const s = t.sync;
   const parts: string[] = [en.platforms[machine.platform]];
-  const stale = machine.isLocal ? null : staleDays(machine.lastSync, now);
-  if (stale !== null) parts.push(s.stale(stale));
-  else
+  const lastSync = machine.lastSync;
+  if (!lastSync) parts.push(s.neverSynced);
+  else {
+    parts.push(s.lastSync(formatDateTime(lastSync)));
+    const stale = machine.isLocal ? null : staleDays(lastSync, now);
+    const days = Math.floor((now - Date.parse(lastSync)) / DAY_MS);
     parts.push(
-      machine.lastSync ? s.syncedAgo(formatTimeAgo(machine.lastSync, now)) : s.neverSynced,
+      stale !== null ? s.stale(stale) : days >= 1 ? s.daysAgo(days) : formatTimeAgo(lastSync, now),
     );
+  }
   if (machine.problem) parts.push(s.problems[machine.problem]);
   if (machine.conflictCopies > 0) parts.push(s.conflicts(machine.conflictCopies));
   return parts.join(' · ');
@@ -448,10 +465,17 @@ function SyncCard({ data, disabled }: { data: SettingsData | null; disabled: boo
       setName(null);
       return s.saved;
     });
-  const remove = (machineId: string) =>
-    run('remove', async () => {
-      const result = await window.api.removeMachine(machineId);
+  const hide = (machineId: string) =>
+    run('hide', async () => {
+      const result = await window.api.hideMachine(machineId);
       return result.status === 'failed' ? t.app.actionFailed : null;
+    });
+  const remove = (machineId: string) =>
+    run('delete', async () => {
+      const result = await window.api.deleteMachine(machineId);
+      if (result.status === 'failed') return t.app.actionFailed;
+      if (result.status === 'driveFailed') return s.deletedDriveFailed;
+      return result.status === 'done' ? s.deleted : null;
     });
   const restore = (machineId: string) =>
     run('restore', async () => {
@@ -590,28 +614,41 @@ function SyncCard({ data, disabled }: { data: SettingsData | null; disabled: boo
                   {machineDetail(machine, now)}
                 </span>
               </div>
-              {!machine.isLocal &&
-                (machine.hidden ? (
-                  <button
-                    type="button"
-                    className="button button--small"
-                    disabled={disabled || busy !== null}
-                    onClick={() => void restore(machine.id)}
-                  >
-                    {s.restore}
-                  </button>
-                ) : (
+              {!machine.isLocal && (
+                <span className="sync-machine-actions">
+                  {machine.hidden ? (
+                    <button
+                      type="button"
+                      className="button button--small"
+                      disabled={disabled || busy !== null}
+                      onClick={() => void restore(machine.id)}
+                    >
+                      {s.restore}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={s.hide(machine.name)}
+                      title={s.hide(machine.name)}
+                      disabled={disabled || busy !== null}
+                      onClick={() => void hide(machine.id)}
+                    >
+                      <EyeOff size={14} strokeWidth={2} aria-hidden="true" />
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="icon-button"
-                    aria-label={s.remove(machine.name)}
-                    title={s.remove(machine.name)}
+                    aria-label={s.delete(machine.name)}
+                    title={s.delete(machine.name)}
                     disabled={disabled || busy !== null}
                     onClick={() => void remove(machine.id)}
                   >
-                    <X size={14} strokeWidth={2} aria-hidden="true" />
+                    <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
                   </button>
-                ))}
+                </span>
+              )}
             </li>
           ))}
         </ul>

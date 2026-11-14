@@ -28,6 +28,7 @@ export const SYNC_SCHEMA_VERSION = 1;
 export const SYNC_FOLDER_NAME = 'ClaudeTokenTracker';
 export const MACHINES_FOLDER = 'machines';
 export const MACHINE_FILE = 'machine.json';
+export const DELETIONS_FILE = 'deleted.json';
 export const README_FILE = 'README.txt';
 /** A year file larger than this is written gzipped, as `<year>.json.gz`. */
 export const GZIP_THRESHOLD = 5 * 1024 * 1024;
@@ -107,6 +108,25 @@ export interface YearFile {
   hourly: HourlyRow[];
   sessions: SessionEntry[];
   subagents: SubagentEntry[];
+}
+
+/** A machine deleted for good by the machine that writes the list. */
+export interface DeletionEntry {
+  id: string;
+  /** The deleted machine's last sync when it was deleted: a later sync brings it back. */
+  lastSync: string | null;
+  /** When it was deleted, UTC ISO. */
+  at: string;
+}
+
+/**
+ * `deleted.json`, in the folder of the machine that deleted them: the machines it deleted
+ * together with their Drive folder, so the other computers delete them too.
+ */
+export interface DeletionsFile {
+  schemaVersion: number;
+  machineId: string;
+  deleted: DeletionEntry[];
 }
 
 export interface MachineFile {
@@ -221,6 +241,10 @@ export function serializeMachineFile(file: MachineFile): string {
   return `${JSON.stringify(file, null, 2)}\n`;
 }
 
+export function serializeDeletionsFile(file: DeletionsFile): string {
+  return `${JSON.stringify(file, null, 2)}\n`;
+}
+
 /** The short explanation written once at the top of the sync folder. */
 export const README_TEXT = `Token Tracker for Claude Code - sync folder
 
@@ -230,13 +254,15 @@ the others'. Nothing in here is sent anywhere by the app: Google Drive for deskt
 
 machines/<machine id>/machine.json   the computer's name, platform and last sync time
 machines/<machine id>/<year>.json    that year's usage (.json.gz when it is large)
+machines/<machine id>/deleted.json   the machines this computer deleted in Settings
 
 Only aggregated numbers are written: local days and hours, project names (folder names,
 never paths), model names, agent types and kinds, token counts, durations, and random
 session and agent ids. Never prompts, responses, code, subagent descriptions or file paths.
 
-Deleting a machine's folder removes its numbers from the other computers the next time
-they read this folder, unless that computer writes it again.
+To remove an old computer everywhere, delete it in the app's Settings > Sync rather than
+deleting its folder by hand: the other computers keep the numbers of a folder that just
+disappears. A deleted computer comes back if it syncs again.
 `;
 
 // ── File names ────────────────────────────────────────────────────────────────
@@ -244,6 +270,7 @@ they read this folder, unless that computer writes it again.
 export type SyncFileName =
   | { kind: 'year'; year: number; gzip: boolean }
   | { kind: 'machine' }
+  | { kind: 'deletions' }
   /** A copy Drive made of a file edited in two places, such as `2026 (1).json`. */
   | { kind: 'conflict' }
   /** A file being written, or anything else (`desktop.ini`, `.DS_Store`). */
@@ -251,10 +278,11 @@ export type SyncFileName =
 
 export function classifySyncFile(name: string): SyncFileName {
   if (name === MACHINE_FILE) return { kind: 'machine' };
+  if (name === DELETIONS_FILE) return { kind: 'deletions' };
   const year = /^(\d{4})\.json(\.gz)?$/.exec(name);
   if (year) return { kind: 'year', year: Number(year[1]), gzip: year[2] !== undefined };
   if (/\.tmp$/i.test(name)) return { kind: 'ignored' };
-  if (/^(\d{4}|machine)\b.*\.json/i.test(name)) return { kind: 'conflict' };
+  if (/^(\d{4}|machine|deleted)\b.*\.json/i.test(name)) return { kind: 'conflict' };
   return { kind: 'ignored' };
 }
 
@@ -437,6 +465,40 @@ export function parseMachineFile(text: string, machineId: string): ParseResult<M
       lastSync: new Date(Date.parse(v.lastSync)).toISOString(),
       years: Array.isArray(v.years) ? v.years.filter(isCount) : [],
     },
+  };
+}
+
+/** At most this many machines in one `deleted.json`. */
+export const MAX_DELETIONS = 500;
+
+function isDeletionEntry(value: unknown): value is DeletionEntry {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return isMachineId(v.id) && (v.lastSync === null || isTimestamp(v.lastSync)) && isTimestamp(v.at);
+}
+
+/** Checks the `deleted.json` of the machine folder `machineId`. Malformed entries are skipped. */
+export function parseDeletionsFile(text: string, machineId: string): ParseResult<DeletionsFile> {
+  const value = parseJson(text);
+  if (value === undefined) return { ok: false, reason: 'json' };
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { ok: false, reason: 'format' };
+  }
+  const v = value as Record<string, unknown>;
+  if (!isCount(v.schemaVersion) || v.schemaVersion < 1) return { ok: false, reason: 'format' };
+  if (v.schemaVersion > SYNC_SCHEMA_VERSION) return { ok: false, reason: 'newerVersion' };
+  if (v.machineId !== machineId) return { ok: false, reason: 'mismatch' };
+  if (!Array.isArray(v.deleted)) return { ok: false, reason: 'format' };
+  const rows = (v.deleted as unknown[]).slice(0, MAX_DELETIONS);
+  const deleted = rows.filter(isDeletionEntry).map((entry) => ({
+    id: entry.id,
+    lastSync: entry.lastSync === null ? null : new Date(Date.parse(entry.lastSync)).toISOString(),
+    at: new Date(Date.parse(entry.at)).toISOString(),
+  }));
+  return {
+    ok: true,
+    skippedRows: v.deleted.length - deleted.length,
+    value: { schemaVersion: v.schemaVersion, machineId, deleted },
   };
 }
 

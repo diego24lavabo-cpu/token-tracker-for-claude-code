@@ -10,10 +10,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Default prices for Opus 4.5 and Sonnet 4.5, which can still appear in Claude Code transcripts.
 - A tooltip on the Overview's estimated cost, and a line in the README, saying what the estimate leaves out: fast mode, US-only inference, web searches and Haiku long-prompt pricing.
+- Settings → Sync: delete an old machine permanently. Its data leaves this computer's database. After a second confirmation, its folder is also deleted from Google Drive, and your other computers delete it too. This computer can't be deleted. A deleted machine that syncs again later comes back, as the confirmation says.
+- Settings → Sync lists each machine's last sync date and time (for example `last sync Nov 3, 2026, 14:05 · 11 days ago`).
 
 ### Changed
 
 - The default prices were checked against Anthropic's price list on 2026-11-13 (unchanged).
+- Settings → Sync: "Remove" is now **Hide** (this computer only, can be undone). Its "Remove and delete its files from Drive" choice is gone: use Delete. A folder deleted that way left the machine on the other computers, flagged "not in the sync folder any more".
 
 ## [0.1.1] - 2026-11-13
 

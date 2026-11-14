@@ -89,6 +89,8 @@ What is **never** written: prompts, responses, code, file paths, subagent task d
 
 Projects with the same name on several machines are merged, with a split per machine. After renaming a project folder, map the old name to the new one in Settings → Project aliases.
 
+To get rid of an old computer, use Settings → Sync → Machines, which shows each machine's last sync date. **Hide** leaves it out on this computer only and can be undone. **Delete** removes its data from this computer's database; a second confirmation also deletes its Drive folder, and the other computers then delete it too (the deleting computer lists it in its own `deleted.json`). This computer can't be deleted. A deleted machine that syncs again later comes back.
+
 ## Privacy
 
 - The app makes no network calls.

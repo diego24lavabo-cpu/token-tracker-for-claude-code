@@ -12,6 +12,9 @@
  *   copies (`2026 (1).json`) are ignored and logged.
  * - Other machines' rows replace their previous ones in the derived tables, under their
  *   own machine id. This machine's rows always come from its own logs.
+ * - A machine deleted in Settings leaves a tombstone with its last sync: its old files are
+ *   ignored, a later sync brings it back. Deleted with its Drive folder, it is also listed
+ *   in this machine's `deleted.json`, and the other computers delete it in turn.
  */
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -19,23 +22,28 @@ import path from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { aliasMap } from '../shared/projects';
 import type { DriveCandidate, Platform, SyncMachine, SyncStatus } from '../shared/types';
-import type { UsageDatabase } from './db';
+import { syncedSince, type UsageDatabase } from './db';
 import { accountFromLabel, findDriveRoots, windowsVolumeLabels, type DriveRoot } from './drive';
 import { tildify } from './paths';
 import {
   buildYearFiles,
   classifySyncFile,
+  DELETIONS_FILE,
   GZIP_THRESHOLD,
   isMachineId,
   MACHINE_FILE,
   MACHINES_FOLDER,
+  MAX_DELETIONS,
   MAX_SYNC_FILE_BYTES,
+  parseDeletionsFile,
   parseMachineFile,
   parseYearFile,
   README_FILE,
   README_TEXT,
   recordsFromYearFiles,
+  serializeDeletionsFile,
   serializeMachineFile,
+  type DeletionEntry,
   serializeYearFile,
   SYNC_FOLDER_NAME,
   SYNC_SCHEMA_VERSION,
@@ -79,6 +87,8 @@ interface WrittenState {
   name: string;
   /** SHA-1 of each year file's text. */
   years: Record<string, string>;
+  /** SHA-1 of the `deleted.json` text, when one was written. */
+  deletions?: string;
 }
 
 /** Reads a stored JSON setting, or null when it is missing or malformed. */
@@ -145,6 +155,8 @@ export class SyncService {
   /** Files already found unreadable, by `<machine>/<file>` and signature, to log them once. */
   private failed = new Map<string, string>();
   private machineFiles = new Map<string, string>();
+  /** The signature of each machine's `deleted.json` already applied. */
+  private deletionFiles = new Map<string, string>();
   private detection: { at: number; roots: DriveCandidate[] } | null = null;
 
   constructor(private readonly host: SyncHost) {}
@@ -201,6 +213,7 @@ export class SyncService {
     this.conflicts.clear();
     this.failed.clear();
     this.machineFiles.clear();
+    this.deletionFiles.clear();
     this.host.onStatusChanged();
   }
 
@@ -300,12 +313,14 @@ export class SyncService {
         folder,
         name: db.machineName,
         years: previous?.folder === folder ? { ...previous.years } : {},
+        deletions: previous?.folder === folder ? previous.deletions : undefined,
       };
       const files = buildYearFiles(db.exportRecords(), db.machineId);
       let changed = false;
       for (const [year, file] of files) {
         changed = this.writeYear(machineDir, year, file, written) || changed;
       }
+      this.writeDeletions(db, machineDir, written);
 
       const now = this.now();
       const lastSync = db.listAllMachines().find((machine) => machine.isLocal)?.lastSync;
@@ -358,6 +373,30 @@ export class SyncService {
     return true;
   }
 
+  /**
+   * Writes `deleted.json`, the machines deleted here with their Drive folder, when its text
+   * changed or the file is missing. Nothing is written before the first such deletion.
+   */
+  private writeDeletions(db: UsageDatabase, dir: string, written: WrittenState): void {
+    const deleted: DeletionEntry[] = db
+      .deletedMachines()
+      .filter((entry) => entry.everywhere)
+      .slice(-MAX_DELETIONS)
+      .map(({ id, lastSync, at }) => ({ id, lastSync, at }));
+    const target = path.join(dir, DELETIONS_FILE);
+    const present = exists(target);
+    if (deleted.length === 0 && !present) return;
+    const text = serializeDeletionsFile({
+      schemaVersion: SYNC_SCHEMA_VERSION,
+      machineId: db.machineId,
+      deleted,
+    });
+    const hash = sha1(text);
+    if (written.deletions === hash && present) return;
+    writeAtomic(target, text);
+    written.deletions = hash;
+  }
+
   private markReachable(reachable: boolean): boolean {
     if (this.reachable !== reachable) {
       this.reachable = reachable;
@@ -407,13 +446,23 @@ export class SyncService {
     }
 
     const seen = new Set<string>();
+    const deletions: DeletionEntry[] = [];
     let dataChanged = false;
     for (const entry of entries) {
       if (!entry.isDirectory() || !isMachineId(entry.name) || entry.name === db.machineId) continue;
       seen.add(entry.name);
       if (db.isMachineHidden(entry.name)) continue;
       dataChanged =
-        (await this.readMachine(db, path.join(machinesDir, entry.name), entry.name)) || dataChanged;
+        (await this.readMachine(db, path.join(machinesDir, entry.name), entry.name, deletions)) ||
+        dataChanged;
+    }
+    // After every folder was read: a machine deleted elsewhere may have synced since.
+    if (
+      deletions.length > 0 &&
+      (await this.host.serial(() => this.applyDeletions(db, deletions)))
+    ) {
+      dataChanged = true;
+      this.host.onStatusChanged();
     }
 
     for (const machine of db.listAllMachines()) {
@@ -425,12 +474,21 @@ export class SyncService {
     if (dataChanged) this.host.onDataChanged();
   }
 
-  /** Reads one machine's folder. True when its usage changed. */
-  private async readMachine(db: UsageDatabase, dir: string, id: string): Promise<boolean> {
+  /**
+   * Reads one machine's folder. True when its usage changed. The machines its new
+   * `deleted.json` lists are added to `deletions`.
+   */
+  private async readMachine(
+    db: UsageDatabase,
+    dir: string,
+    id: string,
+    deletions: DeletionEntry[],
+  ): Promise<boolean> {
     const names = await fs.promises.readdir(dir).catch(() => [] as string[]);
     const conflicts = new Set<string>();
     const years = new Map<number, { name: string; size: number; mtimeMs: number }>();
     let machineStat: { size: number; mtimeMs: number } | null = null;
+    let deletionsStat: { size: number; mtimeMs: number } | null = null;
 
     for (const name of names) {
       const kind = classifySyncFile(name);
@@ -448,6 +506,10 @@ export class SyncService {
         machineStat = stat;
         continue;
       }
+      if (kind.kind === 'deletions') {
+        deletionsStat = stat;
+        continue;
+      }
       // `2026.json` and `2026.json.gz` both present: the newer one wins.
       const known = years.get(kind.year);
       if (!known || stat.mtimeMs > known.mtimeMs) {
@@ -456,23 +518,43 @@ export class SyncService {
     }
     this.conflicts.set(id, conflicts);
 
+    if (deletionsStat && this.deletionFiles.get(id) !== signature(deletionsStat)) {
+      const text = await this.readText(path.join(dir, DELETIONS_FILE), deletionsStat.size);
+      const parsed = text === null ? null : parseDeletionsFile(text, id);
+      if (parsed?.ok) {
+        deletions.push(...parsed.value.deleted);
+        this.deletionFiles.set(id, signature(deletionsStat));
+      } else {
+        // Not a problem of this machine's numbers: only logged, and retried when it changes.
+        this.failure(id, DELETIONS_FILE, deletionsStat, parsed ? parsed.reason : 'json');
+      }
+    }
+
     let problem: SyncMachine['problem'] = null;
     if (machineStat && this.machineFiles.get(id) !== signature(machineStat)) {
       const text = await this.readText(path.join(dir, MACHINE_FILE), machineStat.size);
       const parsed = text === null ? null : parseMachineFile(text, id);
       if (parsed?.ok) {
         const machine = parsed.value;
-        await this.host.serial(() =>
+        const kept = await this.host.serial(() => {
+          // Deleted in Settings: its old files stay ignored until it syncs again.
+          const tombstone = db.deletedMachine(id);
+          if (tombstone && !syncedSince(machine.lastSync, tombstone.lastSync)) return false;
+          if (tombstone) {
+            db.forgetDeletedMachine(id);
+            console.log(`[sync] Machine ${id} synced again after it was deleted`);
+          }
           db.upsertRemoteMachine({
             id,
             name: machine.name,
             platform: machine.platform,
             lastSync: machine.lastSync,
             appVersion: machine.appVersion || null,
-          }),
-        );
+          });
+          return true;
+        });
         this.machineFiles.set(id, signature(machineStat));
-        this.host.onStatusChanged();
+        if (kept) this.host.onStatusChanged();
       } else {
         problem = this.failure(id, MACHINE_FILE, machineStat, parsed ? parsed.reason : 'json');
       }
@@ -525,7 +607,9 @@ export class SyncService {
     this.setProblem(id, problem);
     if (updates.length === 0) return false;
 
-    await this.host.serial(() => {
+    const saved = await this.host.serial(() => {
+      // Deleted or hidden while its files were being read.
+      if (!db.hasMachine(id) || db.isMachineHidden(id)) return false;
       for (const update of updates) {
         db.saveRemoteFile({
           machineId: id,
@@ -537,9 +621,45 @@ export class SyncService {
         });
       }
       this.materialize(db, id);
+      return true;
     });
+    if (!saved) return false;
     console.log(`[sync] Read ${updates.length} file(s) of machine ${id}`);
     return true;
+  }
+
+  /**
+   * Deletes the machines other computers deleted with their Drive folder, unless one
+   * synced since. A machine not seen yet gets a tombstone too, so its old files stay out.
+   * This machine is never deleted. True when a known machine was deleted. Runs on the chain.
+   */
+  private applyDeletions(db: UsageDatabase, entries: readonly DeletionEntry[]): boolean {
+    let changed = false;
+    for (const entry of entries) {
+      if (entry.id === db.machineId) continue;
+      const known = db.listAllMachines().find((machine) => machine.id === entry.id);
+      if (known && syncedSince(known.lastSync, entry.lastSync)) continue;
+      const tombstone = known ? null : db.deletedMachine(entry.id);
+      if (tombstone && !syncedSince(entry.lastSync, tombstone.lastSync)) continue;
+      db.deleteMachine(entry.id, { lastSync: entry.lastSync, at: entry.at, everywhere: false });
+      this.forget(entry.id);
+      if (known) {
+        console.log(`[sync] Deleted machine ${entry.id}: another computer deleted it`);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  /** Forgets what the reads remembered about a machine, so its folder is read afresh. */
+  private forget(machineId: string): void {
+    this.problems.delete(machineId);
+    this.conflicts.delete(machineId);
+    this.machineFiles.delete(machineId);
+    this.deletionFiles.delete(machineId);
+    for (const key of [...this.failed.keys()]) {
+      if (key.startsWith(`${machineId}/`)) this.failed.delete(key);
+    }
   }
 
   /** The text of a sync file, or null when it cannot be read (yet). */
@@ -599,21 +719,63 @@ export class SyncService {
     }
   }
 
-  /** Hides another machine; with `deleteFiles`, also deletes its folder from the sync folder. */
-  async hideMachine(machineId: string, deleteFiles: boolean): Promise<void> {
+  /** Hides another machine on this computer. Its files on Drive are not touched. */
+  async hideMachine(machineId: string): Promise<void> {
     const db = this.host.database();
     if (!db || machineId === db.machineId || !isMachineId(machineId)) return;
     await this.host.serial(() => db.setMachineHidden(machineId, true));
     this.problems.delete(machineId);
+    this.host.onDataChanged();
+  }
+
+  /** True when sync is on and another machine's folder is in the sync folder. */
+  hasDriveFolder(machineId: string): boolean {
+    const db = this.host.database();
     const folder = this.folder;
-    if (deleteFiles && folder) {
+    if (!db || !this.enabled || !folder || machineId === db.machineId || !isMachineId(machineId)) {
+      return false;
+    }
+    return exists(path.join(folder, MACHINES_FOLDER, machineId));
+  }
+
+  /**
+   * Deletes another machine for good on this computer: its rows, its stored files and its
+   * entry. Its old files on Drive never bring it back; a later sync does. With `fromDrive`,
+   * it is also listed in this machine's `deleted.json`, so the other computers delete it
+   * too, and its folder is deleted from the sync folder. Returns false when that Drive part
+   * failed (logged); the machine is deleted here anyway.
+   */
+  async deleteMachine(machineId: string, fromDrive: boolean): Promise<boolean> {
+    const db = this.host.database();
+    if (!db || machineId === db.machineId || !isMachineId(machineId)) return true;
+    const lastSync = db.listAllMachines().find((machine) => machine.id === machineId)?.lastSync;
+    const at = new Date(this.now()).toISOString();
+    await this.host.serial(() =>
+      db.deleteMachine(machineId, { lastSync: lastSync ?? null, at, everywhere: fromDrive }),
+    );
+    this.forget(machineId);
+    console.log(`[sync] Deleted machine ${machineId} from this computer`);
+    this.host.onDataChanged();
+    if (!fromDrive) return true;
+
+    const folder = this.folder;
+    if (!this.enabled || !folder) {
+      console.warn('[sync] Sync is off: the Drive folder was not deleted');
+      return false;
+    }
+    // The list first: should deleting the folder fail, the others still delete the machine.
+    if (!(await this.host.serial(() => this.writeOwnFiles(false)))) return false;
+    try {
       await fs.promises.rm(path.join(folder, MACHINES_FOLDER, machineId), {
         recursive: true,
         force: true,
       });
-      console.log(`[sync] Deleted the sync files of machine ${machineId}`);
+    } catch (error) {
+      console.warn(`[sync] Could not delete the Drive folder of ${machineId}: ${errorCode(error)}`);
+      return false;
     }
-    this.host.onDataChanged();
+    console.log(`[sync] Deleted the Drive folder of machine ${machineId}`);
+    return true;
   }
 
   async restoreMachine(machineId: string): Promise<void> {

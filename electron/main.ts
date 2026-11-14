@@ -14,6 +14,7 @@ import { pathToFileURL } from 'node:url';
 import { IPC } from '../shared/ipc';
 import { localDay } from '../shared/period';
 import { en } from '../src/i18n/en';
+import { formatDateTime } from '../src/lib/format';
 import type {
   ActionResult,
   AddFolderResult,
@@ -21,6 +22,7 @@ import type {
   AppInfo,
   Calendar,
   ChooseFolderResult,
+  DeleteMachineResult,
   ExportResult,
   LogFolder,
   Machine,
@@ -481,30 +483,80 @@ async function useSyncFolder(input: unknown): Promise<SettingsData> {
   return buildSettings();
 }
 
-async function removeMachine(input: unknown): Promise<ActionResult> {
+async function hideMachine(input: unknown): Promise<ActionResult> {
   const machineId = parseMachineIdArgument(input);
   const db = requireWritableDatabase();
   const machine = db.listAllMachines().find((item) => item.id === machineId);
   if (!machine || machine.isLocal) return { status: 'cancelled' };
 
-  const t = en.dialogs.removeMachine;
+  const t = en.dialogs.hideMachine;
   const answer = await showMessage({
     type: 'question',
     message: t.message(machine.name),
     detail: t.detail,
-    buttons: [t.hide, t.hideAndDelete, t.cancel],
+    buttons: [t.hide, t.cancel],
     defaultId: 0,
-    cancelId: 2,
+    cancelId: 1,
     noLink: true,
   });
-  if (answer.response === 2) return { status: 'cancelled' };
+  if (answer.response !== 0) return { status: 'cancelled' };
   try {
-    await sync.hideMachine(machineId, answer.response === 1);
+    await sync.hideMachine(machineId);
   } catch (error) {
-    console.error(`[sync] Could not remove the machine: ${errorText(error)}`);
+    console.error(`[sync] Could not hide the machine: ${errorText(error)}`);
     return { status: 'failed' };
   }
   return { status: 'done' };
+}
+
+/**
+ * Deletes another machine after a confirmation; its Drive folder only after a second one.
+ * This computer is never offered.
+ */
+async function deleteMachine(input: unknown): Promise<DeleteMachineResult> {
+  const machineId = parseMachineIdArgument(input);
+  const db = requireWritableDatabase();
+  const machine = db.listAllMachines().find((item) => item.id === machineId);
+  if (!machine || machine.isLocal) return { status: 'cancelled' };
+
+  const t = en.dialogs.deleteMachine;
+  const onDrive = sync.hasDriveFolder(machineId);
+  const first = await showMessage({
+    type: 'warning',
+    message: t.message(machine.name),
+    detail: t.detail(
+      machine.name,
+      machine.lastSync ? formatDateTime(machine.lastSync) : null,
+      onDrive,
+    ),
+    buttons: [t.delete, t.cancel],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (first.response !== 0) return { status: 'cancelled' };
+
+  let fromDrive = false;
+  if (onDrive) {
+    const second = await showMessage({
+      type: 'warning',
+      message: t.driveMessage(machine.name),
+      detail: t.driveDetail(machine.name, `${SYNC_FOLDER_NAME}/machines/${machineId}`),
+      buttons: [t.deleteFromDrive, t.keepOnDrive],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    });
+    fromDrive = second.response === 0;
+  }
+
+  try {
+    const driveDone = await sync.deleteMachine(machineId, fromDrive);
+    return { status: driveDone ? 'done' : 'driveFailed' };
+  } catch (error) {
+    console.error(`[sync] Could not delete the machine: ${errorText(error)}`);
+    return { status: 'failed' };
+  }
 }
 
 /** Shows a native dialog attached to the window when there is one. */
@@ -803,7 +855,8 @@ function registerIpc(): void {
   handle<ChooseFolderResult>(IPC.chooseSyncFolder, () => chooseSyncFolder());
   handle<SettingsData>(IPC.useSyncFolder, (_event, folder) => useSyncFolder(folder));
   handle<void>(IPC.syncNow, () => sync.syncNow());
-  handle<ActionResult>(IPC.removeMachine, (_event, id) => removeMachine(id));
+  handle<ActionResult>(IPC.hideMachine, (_event, id) => hideMachine(id));
+  handle<DeleteMachineResult>(IPC.deleteMachine, (_event, id) => deleteMachine(id));
   handle<void>(IPC.restoreMachine, (_event, id) => {
     requireWritableDatabase();
     return sync.restoreMachine(parseMachineIdArgument(id));

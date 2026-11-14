@@ -692,7 +692,8 @@ export const en = {
       knownMachines: 'Machines',
       thisMachine: 'this computer',
       hidden: 'Hidden',
-      syncedAgo: (ago: string) => `synced ${ago}`,
+      lastSync: (date: string) => `last sync ${date}`,
+      daysAgo: (days: number) => (days === 1 ? '1 day ago' : `${days} days ago`),
       neverSynced: 'never synced',
       stale: (days: number) => `no sync for ${days} days`,
       problems: {
@@ -702,7 +703,11 @@ export const en = {
       },
       conflicts: (count: number) =>
         count === 1 ? '1 conflict copy ignored' : `${count} conflict copies ignored`,
-      remove: (name: string) => `Remove ${name}`,
+      hide: (name: string) => `Hide ${name} on this computer`,
+      delete: (name: string) => `Delete ${name} permanently`,
+      deleted: 'Machine deleted.',
+      deletedDriveFailed:
+        'Deleted from this computer, but its Google Drive folder could not be deleted. Details are in the app log.',
       restore: 'Show again',
       syncNow: 'Sync now',
       syncing: 'Syncing…',
@@ -815,13 +820,35 @@ export const en = {
       title: 'Choose your Google Drive folder',
       button: 'Sync through this folder',
     },
-    removeMachine: {
-      message: (name: string) => `Remove ${name}?`,
+    hideMachine: {
+      message: (name: string) => `Hide ${name}?`,
       detail:
-        'Its usage disappears from every page on this computer. You can show it again from Settings. Deleting its files also removes it from your other computers, until it syncs again.',
-      hide: 'Remove',
-      hideAndDelete: 'Remove and delete its files from Drive',
+        'Its usage disappears from every page on this computer, and the files it syncs are ignored. Nothing is deleted: you can show it again from Settings. Your other computers still show it.',
+      hide: 'Hide',
       cancel: 'Cancel',
+    },
+    deleteMachine: {
+      message: (name: string) => `Delete ${name} permanently?`,
+      detail: (name: string, lastSync: string | null, onDrive: boolean) =>
+        [
+          lastSync ? `Last sync: ${lastSync}.` : 'It never synced.',
+          `Its usage and its copy of the sync files are deleted from this computer’s database: it leaves every page and the machine list. This cannot be undone.`,
+          `If ${name} syncs again later, it reappears, with all the usage in its sync files.`,
+          onDrive
+            ? 'Next, you can also delete its folder from Google Drive.'
+            : 'Its files on Google Drive, if any, are not touched (sync is off or its folder is not there).',
+        ].join('\n\n'),
+      delete: 'Delete',
+      cancel: 'Cancel',
+      driveMessage: (name: string) => `Also delete the Google Drive folder of ${name}?`,
+      driveDetail: (name: string, folder: string) =>
+        [
+          `${folder} is deleted, and ${name} disappears from every computer that syncs, not only this one. This cannot be undone.`,
+          `If ${name} still runs the app with sync on, it writes its files again and reappears everywhere.`,
+          'Keep on Drive: it is deleted on this computer only. Its old files stay ignored here until it syncs again.',
+        ].join('\n\n'),
+      deleteFromDrive: 'Delete from Drive',
+      keepOnDrive: 'Keep on Drive',
     },
   },
 

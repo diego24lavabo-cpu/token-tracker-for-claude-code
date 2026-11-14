@@ -192,6 +192,17 @@ export function formatBytes(bytes: number): string {
   return `${value < 10 ? oneDecimalFormat.format(value) : integerFormat.format(value)} ${unit}`;
 }
 
+const pad2 = (value: number) => String(value).padStart(2, '0');
+
+/** An instant in this computer's time zone, with the year: `Nov 3, 2026, 14:05`. */
+export function formatDateTime(iso: string): string {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return PLACEHOLDER;
+  const date = new Date(at);
+  const day = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+  return `${formatDay(day, { year: true })}, ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
 /** How long ago an instant was: `just now`, `4 min ago`, `3 h ago`, then the day. */
 export function formatTimeAgo(iso: string, now: number = Date.now()): string {
   const at = Date.parse(iso);

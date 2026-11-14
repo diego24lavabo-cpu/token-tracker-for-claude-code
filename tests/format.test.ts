@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatCost,
+  formatDateTime,
   formatDay,
   formatMonth,
   formatDuration,
@@ -184,5 +185,17 @@ describe('formatRelativeDay', () => {
 
   it('shows a dash for a value that is not a day', () => {
     expect(formatRelativeDay('', '2026-11-10')).toBe('—');
+  });
+});
+
+describe('formatDateTime', () => {
+  it('shows a local instant with the year and a 24-hour clock', () => {
+    // Built from local fields, so the test holds in any time zone.
+    expect(formatDateTime(new Date(2026, 10, 3, 14, 5).toISOString())).toBe('Nov 3, 2026, 14:05');
+    expect(formatDateTime(new Date(2025, 0, 9, 0, 7).toISOString())).toBe('Jan 9, 2025, 00:07');
+  });
+
+  it('shows a dash for a value that is not a date', () => {
+    expect(formatDateTime('soon')).toBe('—');
   });
 });

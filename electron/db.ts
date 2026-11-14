@@ -760,6 +760,30 @@ const SETTING_DERIVED_DIRTY = 'derived_dirty';
 const SETTING_CONTAINERS = 'container_projects';
 const SETTING_ALIASES = 'project_aliases';
 
+const SETTING_DELETED = 'deleted_machines';
+
+/** A machine deleted for good. */
+export interface DeletedMachine {
+  id: string;
+  /** Its last sync when it was deleted: only a later sync brings it back. */
+  lastSync: string | null;
+  /** When it was deleted, UTC ISO. */
+  at: string;
+  /** Deleted here with its Drive folder: listed in this machine's `deleted.json`. */
+  everywhere: boolean;
+}
+
+/** True when `candidate` is a later sync than `than` (any sync is later than none). */
+export function syncedSince(candidate: string | null, than: string | null): boolean {
+  if (candidate === null) return false;
+  if (than === null) return true;
+  return Date.parse(candidate) > Date.parse(than);
+}
+
+function laterSync(a: string | null, b: string | null): string | null {
+  return syncedSince(b, a) ? b : a;
+}
+
 /** The derived tables, which hold every machine's rows under its machine id. */
 const MACHINE_TABLES = [
   'hourly',
@@ -1109,6 +1133,72 @@ export class UsageDatabase {
         .run(hidden ? 1 : 0, machineId);
       if (hidden) this.deleteMachineRows(machineId);
     })();
+  }
+
+  hasMachine(machineId: string): boolean {
+    return this.raw.prepare('SELECT 1 FROM machines WHERE id = ?').get(machineId) !== undefined;
+  }
+
+  /**
+   * Deletes another machine for good: its rows, its stored sync files and its entry.
+   * A tombstone keeps its last sync, so its old files on Drive do not bring it back; a
+   * later sync does. With `everywhere`, this machine lists it in its own `deleted.json`.
+   * A tombstone already there is merged: the later last sync wins, `everywhere` stays.
+   */
+  deleteMachine(machineId: string, tombstone: Omit<DeletedMachine, 'id'>): void {
+    if (machineId === this.machineId) return;
+    this.raw.transaction(() => {
+      this.deleteMachineRows(machineId);
+      this.raw.prepare('DELETE FROM remote_files WHERE machine_id = ?').run(machineId);
+      this.raw.prepare('DELETE FROM machines WHERE id = ?').run(machineId);
+      const list = this.deletedMachines();
+      const old = list.find((entry) => entry.id === machineId);
+      const merged: DeletedMachine = old
+        ? {
+            id: machineId,
+            lastSync: laterSync(old.lastSync, tombstone.lastSync),
+            at: old.at,
+            everywhere: old.everywhere || tombstone.everywhere,
+          }
+        : { id: machineId, ...tombstone };
+      this.saveDeletedMachines([...list.filter((entry) => entry.id !== machineId), merged]);
+    })();
+  }
+
+  /** The machines deleted in Settings or by another machine's `deleted.json`. */
+  deletedMachines(): DeletedMachine[] {
+    try {
+      const value = JSON.parse(this.getSetting(SETTING_DELETED) ?? '[]') as unknown;
+      if (!Array.isArray(value)) return [];
+      return value.filter(
+        (entry): entry is DeletedMachine =>
+          typeof entry === 'object' &&
+          entry !== null &&
+          typeof (entry as DeletedMachine).id === 'string' &&
+          typeof (entry as DeletedMachine).at === 'string' &&
+          typeof (entry as DeletedMachine).everywhere === 'boolean' &&
+          ((entry as DeletedMachine).lastSync === null ||
+            typeof (entry as DeletedMachine).lastSync === 'string'),
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  deletedMachine(machineId: string): DeletedMachine | null {
+    return this.deletedMachines().find((entry) => entry.id === machineId) ?? null;
+  }
+
+  /** A deleted machine synced again: it is an ordinary machine from now on. */
+  forgetDeletedMachine(machineId: string): void {
+    const list = this.deletedMachines();
+    if (list.some((entry) => entry.id === machineId)) {
+      this.saveDeletedMachines(list.filter((entry) => entry.id !== machineId));
+    }
+  }
+
+  private saveDeletedMachines(list: DeletedMachine[]): void {
+    this.setSetting(SETTING_DELETED, JSON.stringify(list));
   }
 
   private deleteMachineRows(machineId: string): void {

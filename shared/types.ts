@@ -722,7 +722,7 @@ export interface SyncMachine {
   isLocal: boolean;
   lastSync: string | null;
   appVersion: string | null;
-  /** Removed in Settings: its usage is left out everywhere. */
+  /** Hidden in Settings: its usage is left out everywhere on this computer. */
   hidden: boolean;
   /**
    * Why its numbers may not be current: its files need a newer version of the app, the
@@ -850,6 +850,9 @@ export type AddFolderResult =
 
 export type ActionResult = { status: 'done' } | { status: 'cancelled' } | { status: 'failed' };
 
+/** `driveFailed`: deleted from this computer, but its Drive folder could not be deleted. */
+export type DeleteMachineResult = ActionResult | { status: 'driveFailed' };
+
 export type ChooseFolderResult = { status: 'chosen'; folder: string } | { status: 'cancelled' };
 
 export interface Api {
@@ -896,8 +899,14 @@ export interface Api {
   useSyncFolder(path: string): Promise<SettingsData>;
   /** Writes this machine's files and reads the others' now. Resolves when done. */
   syncNow(): Promise<void>;
-  /** After a confirmation, hides another machine (and can delete its sync files). */
-  removeMachine(machineId: string): Promise<ActionResult>;
+  /** After a confirmation, hides another machine on this computer. Drive is not touched. */
+  hideMachine(machineId: string): Promise<ActionResult>;
+  /**
+   * After a confirmation, deletes another machine (hidden or not) from this computer's
+   * database; after a second one, also its Drive folder, so every computer deletes it.
+   * It comes back if it syncs again.
+   */
+  deleteMachine(machineId: string): Promise<DeleteMachineResult>;
   /** Shows a hidden machine again. */
   restoreMachine(machineId: string): Promise<void>;
   /** Subscribes to "usage data changed" events. Returns an unsubscribe function. */

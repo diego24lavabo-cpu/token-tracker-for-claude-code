@@ -26,6 +26,7 @@ import { EXPORT_DEBOUNCE_MS, EXPORT_MIN_INTERVAL_MS, SyncService } from '../elec
 import {
   buildYearFiles,
   classifySyncFile,
+  parseDeletionsFile,
   parseMachineFile,
   parseYearFile,
   serializeYearFile,
@@ -626,11 +627,11 @@ describe('reading', () => {
   });
 });
 
-describe('removing a machine', () => {
+describe('hiding a machine', () => {
   it('hides it everywhere, and shows it again without reading Drive', async () => {
     const { folder, mac, pc, pcSync } = await twoMachines();
     const pcOnly = own(pc);
-    await pcSync.service.hideMachine(mac.machineId, false);
+    await pcSync.service.hideMachine(mac.machineId);
     expect(getOverview(pc, PRICING, PERIOD, EVENING).kpis.totalTokens).toBe(pcOnly);
     expect(pc.listMachines().map((machine) => machine.name)).toEqual(['Tower']);
     expect(pcSync.service.machines().find((m) => m.id === mac.machineId)!.hidden).toBe(true);
@@ -644,11 +645,243 @@ describe('removing a machine', () => {
     expect(getOverview(pc, PRICING, PERIOD, EVENING).kpis.totalTokens).toBe(pcOnly + own(mac));
   });
 
-  it("deletes its files from Drive only when asked to, and never this machine's", async () => {
+  it('never hides this machine, and leaves Drive alone', async () => {
     const { folder, mac, pc, pcSync } = await twoMachines();
-    await pcSync.service.hideMachine(pc.machineId, true);
-    expect(fs.existsSync(path.join(folder, 'machines', pc.machineId))).toBe(true);
-    await pcSync.service.hideMachine(mac.machineId, true);
+    await pcSync.service.hideMachine(pc.machineId);
+    expect(pc.listMachines()).toHaveLength(2);
+    await pcSync.service.hideMachine(mac.machineId);
+    expect(fs.existsSync(macDir(folder, mac))).toBe(true);
+  });
+});
+
+/** Rows of a machine left in the derived tables, the stored sync files and the machine list. */
+function rowsOf(db: UsageDatabase, machineId: string): number {
+  const tables = [
+    'hourly',
+    'sessions',
+    'session_projects',
+    'session_days',
+    'session_models',
+    'subagents',
+    'subagent_models',
+    'remote_files',
+  ];
+  let total = 0;
+  for (const table of tables) {
+    total += db.raw
+      .prepare(`SELECT COUNT(*) FROM ${table} WHERE machine_id = ?`)
+      .pluck()
+      .get(machineId) as number;
+  }
+  return total + (db.hasMachine(machineId) ? 1 : 0);
+}
+
+/** The Mac writes its files again later, as a computer still running the app would. */
+async function macSyncsAgain(
+  folder: string,
+  mac: UsageDatabase,
+  macSync: { service: SyncService },
+) {
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  await macSync.service.syncNow();
+  // Some file systems keep mtimes coarse: make sure the change is seen.
+  const file = path.join(macDir(folder, mac), 'machine.json');
+  fs.utimesSync(file, new Date(), new Date(Date.now() + 5_000));
+}
+
+/** A third computer, reading the same folder. */
+async function laptopOn(folder: string) {
+  const laptop = database('Laptop', 'linux');
+  const laptopSync = syncFor(laptop, 'linux');
+  laptopSync.service.setFolder(folder, true);
+  await laptopSync.service.setEnabled(true, noDrive);
+  return { laptop, laptopSync };
+}
+
+describe('deleting a machine', () => {
+  it('deletes it from this computer only, and its old files do not bring it back', async () => {
+    const { folder, mac, pc, pcSync } = await twoMachines();
+    const pcOnly = own(pc);
+    const lastSync = pc.listAllMachines().find((m) => m.id === mac.machineId)!.lastSync;
+    expect(rowsOf(pc, mac.machineId)).toBeGreaterThan(1);
+
+    expect(pcSync.service.hasDriveFolder(mac.machineId)).toBe(true);
+    expect(await pcSync.service.deleteMachine(mac.machineId, false)).toBe(true);
+    expect(rowsOf(pc, mac.machineId)).toBe(0);
+    expect(pcSync.service.machines().map((m) => m.name)).toEqual(['Tower']);
+    expect(getOverview(pc, PRICING, PERIOD, EVENING).kpis.totalTokens).toBe(pcOnly);
+    expect(pc.deletedMachine(mac.machineId)).toMatchObject({ lastSync, everywhere: false });
+
+    // Drive is untouched, nothing tells the others, and reading again changes nothing.
+    expect(fs.existsSync(macDir(folder, mac))).toBe(true);
+    expect(fs.existsSync(path.join(folder, 'machines', pc.machineId, 'deleted.json'))).toBe(false);
+    await pcSync.service.readNow();
+    await pcSync.service.readNow();
+    expect(rowsOf(pc, mac.machineId)).toBe(0);
+    expect(mac.listMachines()).toHaveLength(2);
+  });
+
+  it('brings it back with all its usage once it syncs again', async () => {
+    const { folder, mac, pc, pcSync, macSync } = await twoMachines();
+    const before = getOverview(pc, PRICING, PERIOD, EVENING).kpis.totalTokens;
+    await pcSync.service.deleteMachine(mac.machineId, false);
+    await pcSync.service.readNow();
+
+    await macSyncsAgain(folder, mac, macSync);
+    await pcSync.service.readNow();
+    expect(pc.listMachines().map((m) => m.name)).toEqual(['Tower', 'MacBook']);
+    expect(getOverview(pc, PRICING, PERIOD, EVENING).kpis.totalTokens).toBe(before);
+    expect(pc.deletedMachine(mac.machineId)).toBeNull();
+  });
+
+  it('deletes its Drive folder, so it disappears on every computer, until it syncs again', async () => {
+    const { folder, mac, pc, pcSync, macSync } = await twoMachines();
+    const { laptop, laptopSync } = await laptopOn(folder);
+    expect(laptop.listMachines()).toHaveLength(3);
+    const laptopBefore = getOverview(laptop, PRICING, PERIOD, EVENING).kpis.totalTokens;
+
+    expect(await pcSync.service.deleteMachine(mac.machineId, true)).toBe(true);
     expect(fs.existsSync(macDir(folder, mac))).toBe(false);
+    expect(pcSync.service.hasDriveFolder(mac.machineId)).toBe(false);
+    const list = JSON.parse(
+      fs.readFileSync(path.join(folder, 'machines', pc.machineId, 'deleted.json'), 'utf8'),
+    ) as { machineId: string; deleted: { id: string }[] };
+    expect(list.machineId).toBe(pc.machineId);
+    expect(list.deleted.map((entry) => entry.id)).toEqual([mac.machineId]);
+
+    // The laptop deletes it too, instead of keeping it as "missing".
+    await laptopSync.service.readNow();
+    expect(laptop.listMachines().map((m) => m.name)).toEqual(['Laptop', 'Tower']);
+    expect(rowsOf(laptop, mac.machineId)).toBe(0);
+    expect(getOverview(laptop, PRICING, PERIOD, EVENING).kpis.totalTokens).toBe(
+      laptopBefore - own(mac),
+    );
+    expect(laptop.deletedMachine(mac.machineId)).toMatchObject({ everywhere: false });
+
+    // The Mac never deletes itself.
+    await macSync.service.readNow();
+    expect(mac.listMachines().map((m) => m.name)).toEqual(['MacBook', 'Laptop', 'Tower']);
+
+    // Still running the app, the Mac writes its files again: it is back everywhere.
+    await macSyncsAgain(folder, mac, macSync);
+    await pcSync.service.readNow();
+    await laptopSync.service.readNow();
+    expect(pc.listMachines()).toHaveLength(3);
+    expect(getOverview(laptop, PRICING, PERIOD, EVENING).kpis.totalTokens).toBe(laptopBefore);
+    // The PC's next write drops it from its list, which no longer applies anyway.
+    pcSync.service.writeOwnFiles(true);
+    expect(
+      JSON.parse(
+        fs.readFileSync(path.join(folder, 'machines', pc.machineId, 'deleted.json'), 'utf8'),
+      ),
+    ).toMatchObject({ deleted: [] });
+  });
+
+  it('keeps a computer that joins later from showing a machine deleted elsewhere', async () => {
+    const { folder, mac, pc, pcSync } = await twoMachines();
+    await pcSync.service.deleteMachine(mac.machineId, false);
+    // Its folder is still on Drive (another computer has not caught up), and a deletion list says no.
+    pc.deleteMachine(mac.machineId, {
+      lastSync: mac.listAllMachines()[0]!.lastSync,
+      at: new Date().toISOString(),
+      everywhere: true,
+    });
+    pcSync.service.writeOwnFiles(true);
+    expect(fs.existsSync(macDir(folder, mac))).toBe(true);
+
+    const { laptop } = await laptopOn(folder);
+    expect(laptop.listMachines().map((m) => m.name)).toEqual(['Laptop', 'Tower']);
+    expect(rowsOf(laptop, mac.machineId)).toBe(0);
+  });
+
+  it('never deletes this machine, even when another computer lists it', async () => {
+    const { folder, pc, pcSync, macSync } = await twoMachines();
+    expect(pcSync.service.hasDriveFolder(pc.machineId)).toBe(false);
+    await pcSync.service.deleteMachine(pc.machineId, true);
+    expect(pc.listMachines()).toHaveLength(2);
+    expect(fs.existsSync(path.join(folder, 'machines', pc.machineId))).toBe(true);
+    pc.deleteMachine(pc.machineId, {
+      lastSync: null,
+      at: new Date().toISOString(),
+      everywhere: true,
+    });
+    expect(pc.deletedMachines()).toEqual([]);
+
+    // The Mac lists the PC in its own deletions: the PC keeps itself.
+    await macSync.service.deleteMachine(pc.machineId, true);
+    await pcSync.service.readNow();
+    expect(pc.listMachines().map((m) => m.name)).toEqual(['Tower', 'MacBook']);
+    expect(own(pc)).toBeGreaterThan(0);
+  });
+
+  it('deletes a hidden machine too', async () => {
+    const { mac, pc, pcSync } = await twoMachines();
+    await pcSync.service.hideMachine(mac.machineId);
+    await pcSync.service.deleteMachine(mac.machineId, false);
+    expect(rowsOf(pc, mac.machineId)).toBe(0);
+    await pcSync.service.readNow();
+    expect(pc.listAllMachines()).toHaveLength(1);
+  });
+
+  it('leaves Drive alone while sync is off, and says the Drive part failed', async () => {
+    const { folder, mac, pc, pcSync } = await twoMachines();
+    await pcSync.service.setEnabled(false);
+    expect(pcSync.service.hasDriveFolder(mac.machineId)).toBe(false);
+    expect(await pcSync.service.deleteMachine(mac.machineId, true)).toBe(false);
+    expect(rowsOf(pc, mac.machineId)).toBe(0);
+    expect(fs.existsSync(macDir(folder, mac))).toBe(true);
+  });
+});
+
+describe('deleted.json', () => {
+  it('is checked entry by entry, and its conflict copies are ignored', () => {
+    const id = 'f4627a72-0000-4000-8000-000000000001';
+    const good = {
+      id: 'c33d0000-0000-4000-8000-000000000002',
+      lastSync: '2026-11-01T10:00:00Z',
+      at: '2026-11-14T09:00:00Z',
+    };
+    const parsed = parseDeletionsFile(
+      JSON.stringify({
+        schemaVersion: 1,
+        machineId: id,
+        deleted: [
+          good,
+          { id: '../x', lastSync: null, at: good.at },
+          'nonsense',
+          { ...good, lastSync: null },
+        ],
+      }),
+      id,
+    );
+    expect(parsed).toEqual({
+      ok: true,
+      skippedRows: 2,
+      value: {
+        schemaVersion: 1,
+        machineId: id,
+        deleted: [
+          { id: good.id, lastSync: '2026-11-01T10:00:00.000Z', at: '2026-11-14T09:00:00.000Z' },
+          { id: good.id, lastSync: null, at: '2026-11-14T09:00:00.000Z' },
+        ],
+      },
+    });
+    expect(parseDeletionsFile('{"schemaVersion":1', id)).toEqual({ ok: false, reason: 'json' });
+    expect(
+      parseDeletionsFile(JSON.stringify({ schemaVersion: 1, machineId: good.id, deleted: [] }), id),
+    ).toEqual({ ok: false, reason: 'mismatch' });
+    expect(classifySyncFile('deleted.json')).toEqual({ kind: 'deletions' });
+    expect(classifySyncFile('deleted (1).json')).toEqual({ kind: 'conflict' });
+    expect(classifySyncFile('deleted.json.tmp')).toEqual({ kind: 'ignored' });
+  });
+
+  it('a broken list deletes nothing', async () => {
+    const { folder, mac, pc, macSync } = await twoMachines();
+    const { laptop, laptopSync } = await laptopOn(folder);
+    fs.writeFileSync(path.join(folder, 'machines', pc.machineId, 'deleted.json'), '{"schema');
+    await laptopSync.service.readNow();
+    await macSync.service.readNow();
+    expect(laptop.listMachines()).toHaveLength(3);
+    expect(mac.listMachines()).toHaveLength(3);
   });
 });
