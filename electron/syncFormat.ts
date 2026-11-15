@@ -29,6 +29,8 @@ export const SYNC_FOLDER_NAME = 'ClaudeTokenTracker';
 export const MACHINES_FOLDER = 'machines';
 export const MACHINE_FILE = 'machine.json';
 export const DELETIONS_FILE = 'deleted.json';
+/** The last hours minute by minute, for the Live page (see `liveFormat.ts`). */
+export const LIVE_FILE = 'live.json';
 export const README_FILE = 'README.txt';
 /** A year file larger than this is written gzipped, as `<year>.json.gz`. */
 export const GZIP_THRESHOLD = 5 * 1024 * 1024;
@@ -249,7 +251,7 @@ export function serializeDeletionsFile(file: DeletionsFile): string {
  * Version of `README_TEXT`. Bump it whenever the text changes: a README with no marker or
  * an older one is rewritten, a newer one (from a newer app on another computer) is kept.
  */
-export const README_VERSION = 2;
+export const README_VERSION = 3;
 const README_MARKER = 'README version:';
 
 /** The version marker of a README's text, or 0 when it has none. */
@@ -268,10 +270,14 @@ the others'. Nothing in here is sent anywhere by the app: Google Drive for deskt
 machines/<machine id>/machine.json   the computer's name, platform and last sync time
 machines/<machine id>/<year>.json    that year's usage (.json.gz when it is large)
 machines/<machine id>/deleted.json   the machines this computer deleted in Settings
+machines/<machine id>/live.json      the last hours minute by minute, for the Live page;
+                                     rewritten every minute while in use, every 5 minutes
+                                     while the app runs
 
 Only aggregated numbers are written: local days and hours, project names (folder names,
-never paths), model names, agent types and kinds, token counts, durations, and random
-session and agent ids. Never prompts, responses, code, subagent descriptions or file paths.
+never paths), model names, agent types and kinds, token counts, durations, response times
+(live.json), and random session and agent ids. Never prompts, responses, code, subagent
+descriptions or file paths.
 
 To remove an old computer everywhere, delete it in the app's Settings > Sync rather than
 deleting its folder by hand: the other computers keep the numbers of a folder that just
@@ -286,6 +292,7 @@ export type SyncFileName =
   | { kind: 'year'; year: number; gzip: boolean }
   | { kind: 'machine' }
   | { kind: 'deletions' }
+  | { kind: 'live' }
   /** A copy Drive made of a file edited in two places, such as `2026 (1).json`. */
   | { kind: 'conflict' }
   /** A file being written, or anything else (`desktop.ini`, `.DS_Store`). */
@@ -294,10 +301,11 @@ export type SyncFileName =
 export function classifySyncFile(name: string): SyncFileName {
   if (name === MACHINE_FILE) return { kind: 'machine' };
   if (name === DELETIONS_FILE) return { kind: 'deletions' };
+  if (name === LIVE_FILE) return { kind: 'live' };
   const year = /^(\d{4})\.json(\.gz)?$/.exec(name);
   if (year) return { kind: 'year', year: Number(year[1]), gzip: year[2] !== undefined };
   if (/\.tmp$/i.test(name)) return { kind: 'ignored' };
-  if (/^(\d{4}|machine|deleted)\b.*\.json/i.test(name)) return { kind: 'conflict' };
+  if (/^(\d{4}|machine|deleted|live)\b.*\.json/i.test(name)) return { kind: 'conflict' };
   return { kind: 'ignored' };
 }
 
@@ -321,17 +329,17 @@ export type ParseFailure =
 export type ParseResult<T> =
   { ok: true; value: T; skippedRows: number } | { ok: false; reason: ParseFailure };
 
-const isCount = (value: unknown): value is number =>
+export const isCount = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 
-const isName = (value: unknown, max = MAX_NAME): value is string =>
+export const isName = (value: unknown, max = MAX_NAME): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= max;
 
 function isTimestamp(value: unknown): value is string {
   return typeof value === 'string' && value.length <= 40 && Number.isFinite(Date.parse(value));
 }
 
-function isModelRow(value: unknown): value is ModelRow {
+export function isModelRow(value: unknown): value is ModelRow {
   return (
     Array.isArray(value) &&
     value.length === 6 &&
@@ -403,7 +411,8 @@ function isSubagentEntry(value: unknown, year: number): value is SubagentEntry {
   );
 }
 
-function parseJson(text: string): unknown {
+/** The value of a JSON text (a leading BOM allowed), or undefined when it is not JSON. */
+export function parseJson(text: string): unknown {
   try {
     return JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text) as unknown;
   } catch {

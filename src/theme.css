@@ -3056,6 +3056,12 @@ button {
   color: var(--text);
 }
 
+.live-reference-scope {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .live-reference-choice {
   display: flex;
   flex-wrap: wrap;

@@ -89,12 +89,14 @@ import {
 } from './demo';
 import { syncFolderFromPick } from './drive';
 import {
+  buildLiveFile,
   calibrate,
   emptyLive,
   getLive,
   parseCalibrationPercent,
   parseLiveHours,
   parseReferenceChoice,
+  rememberCombinedWindows,
   setReferenceChoice,
   type ClaudeSource,
 } from './live';
@@ -212,6 +214,10 @@ function notifySyncUpdated(): void {
   mainWindow?.webContents.send(IPC.syncUpdated);
 }
 
+function notifyLiveUpdated(): void {
+  mainWindow?.webContents.send(IPC.liveUpdated);
+}
+
 /** Runs a task after every task queued before it. */
 function serial<T>(task: () => T | Promise<T>): Promise<T> {
   const run = taskChain.then(task);
@@ -226,7 +232,22 @@ const sync = new SyncService({
   serial,
   onDataChanged: notifyUsageUpdated,
   onStatusChanged: notifySyncUpdated,
+  liveFile: (db, now) => buildLiveFile(db, pricing, now),
+  // Without file watching, live data is only as current as the last scan.
+  liveCurrent: () => database !== null && getFileWatching(database),
+  onLiveChanged: liveChanged,
 });
+
+/**
+ * Another computer's live data changed: remember the combined window that may have just
+ * reset (the Live page need not be open), then refresh the Live page.
+ */
+function liveChanged(): void {
+  serial(() => {
+    if (database && !quitting) rememberCombinedWindows(database, pricing, sync.liveFiles());
+  }).catch((error: unknown) => console.warn(`[live] ${errorText(error)}`));
+  notifyLiveUpdated();
+}
 
 /** The log folders found by the app; in demo mode only the sample data. */
 function autoLogRoots(): string[] {
@@ -300,8 +321,10 @@ function scanUsage(before?: (db: UsageDatabase) => void): Promise<void> {
         // At startup: write what changed while the app was closed, and read the others.
         sync.start();
         void sync.syncNow();
-      } else if (before || summary.imported + summary.upgraded > 0) {
-        sync.localDataChanged();
+      } else {
+        if (before || summary.imported + summary.upgraded > 0) sync.localDataChanged();
+        // Every scan: live.json then says this machine's numbers are current as of now.
+        sync.liveDataChanged();
       }
     } catch (error) {
       if (!quitting) console.error('[scan] The scan failed:', error);
@@ -498,6 +521,7 @@ async function applySettings(input: unknown): Promise<SettingsData> {
     const projects = patch.containerProjects;
     await serial(() => db.setContainerProjects(projects));
     sync.localDataChanged();
+    sync.liveDataChanged();
   }
   if (patch.projectAliases) {
     const aliases = patch.projectAliases;
@@ -507,6 +531,7 @@ async function applySettings(input: unknown): Promise<SettingsData> {
       sync.materializeAll(db);
     });
     sync.localDataChanged();
+    sync.liveDataChanged();
   }
   if (patch.machineName !== undefined) {
     db.setMachineName(patch.machineName);
@@ -890,12 +915,27 @@ function registerIpc(): void {
     const claude = await claudeSource(db);
     // The database may have closed during the read (the app quitting).
     if (database !== db) return emptyLive(hours);
-    return getLive(db, pricing, machineIds, hours, Date.now(), claude);
+    return getLive(
+      db,
+      pricing,
+      machineIds,
+      hours,
+      Date.now(),
+      claude,
+      sync.liveFiles(),
+      sync.liveNewer(),
+    );
   });
 
   handle<CalibrateResult>(IPC.calibrateLive, (_event, percentInput) => {
     const percent = parseCalibrationPercent(percentInput);
-    const result = calibrate(requireWritableDatabase(), pricing, percent);
+    const result = calibrate(
+      requireWritableDatabase(),
+      pricing,
+      percent,
+      Date.now(),
+      sync.liveFiles(),
+    );
     if (result.status === 'done') notifyUsageUpdated();
     return result;
   });

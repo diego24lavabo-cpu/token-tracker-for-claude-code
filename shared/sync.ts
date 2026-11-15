@@ -1,5 +1,8 @@
 /** Sync rules shared by the main process and the UI. */
 
+/** The first app version that shares live data (`live.json`) with the other computers. */
+export const LIVE_MIN_VERSION = '0.1.2';
+
 /** A machine that has not written its sync files for longer than this is flagged. */
 export const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 

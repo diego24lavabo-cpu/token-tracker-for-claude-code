@@ -145,7 +145,7 @@ describe('generateDemoData', () => {
       expect(machine.window!.end).toBeGreaterThan(LIVE_AT);
       expect(machine.window!.total).toBeGreaterThan(0);
       expect(machine.burn.tokensPerMinute).toBeGreaterThan(0);
-      expect(machine.estimate).not.toBeNull();
+      expect(live.estimate).not.toBeNull();
       expect(live.active.map((project) => project.project)).toContain('demo-app');
       expect(live.series.length).toBeGreaterThan(0);
     });
@@ -236,6 +236,47 @@ describe('demo environment', () => {
 
       removeDemoEnvironment(env);
       expect(fs.readdirSync(env.root)).toEqual(['.token-tracker-demo']);
+    },
+    SLOW_TEST_MS,
+  );
+
+  it(
+    'shares the second computer’s live data, so the Live page shows every computer together',
+    async () => {
+      const env = createDemoEnvironment('win32', tempDir());
+      const liveAt = Date.now();
+      await generateDemoWorld(env, 'win32', '0.1.0', { localDays: 3, otherDays: 3, liveAt });
+
+      const db = new UsageDatabase(':memory:', { machineName: env.machineName, platform: 'win32' });
+      open.push(db);
+      await scanLogs(db, [env.logRoot]);
+      const sync = new SyncService({
+        database: () => db,
+        appVersion: '0.1.0',
+        platform: 'win32',
+        serial: <T>(task: () => T | Promise<T>) => Promise.resolve().then(task),
+        onDataChanged: () => undefined,
+        onStatusChanged: () => undefined,
+      });
+      services.push(sync);
+      sync.setFolder(env.syncFolder, true);
+      await sync.setEnabled(true, async () => []);
+      expect(sync.liveFiles().map((file) => file.writtenAt)).toEqual([liveAt]);
+
+      const live = getLive(db, DEFAULT_PRICING, undefined, 6, liveAt, undefined, sync.liveFiles());
+      const [local, other] = live.machines;
+      expect(other).toMatchObject({ name: 'MacBook Pro', status: 'active' });
+      expect(local?.status).toBe('active');
+      // The second computer's session started 230 minutes ago and stopped 185 minutes ago;
+      // this one's started 170 minutes ago. Only this one is in use now.
+      expect(other!.lastResponse).toBeLessThanOrEqual(liveAt - 185 * 60_000);
+      expect(live.active.length).toBeGreaterThan(0);
+      expect(live.combined?.status).toBe('active');
+      expect(live.combined!.window!.start).toBeLessThanOrEqual(liveAt - 230 * 60_000);
+      expect(live.combined!.window!.start).toBeLessThanOrEqual(local!.window!.start);
+      expect(live.combined!.window!.total).toBeGreaterThan(local!.window!.total);
+      expect(live.reference.scope).toEqual({ counted: ['MacBook Pro'], others: 1 });
+      removeDemoEnvironment(env);
     },
     SLOW_TEST_MS,
   );

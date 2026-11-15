@@ -21,6 +21,18 @@ export interface DemoDataOptions {
    * earlier, so the Live page has a running window (default: none).
    */
   liveAt?: number;
+  /**
+   * With `liveAt`: how many minutes before it the running session started (default 170).
+   * A second computer started earlier makes the combined window start on it.
+   */
+  liveStartMinutes?: number;
+  /**
+   * With `liveAt`: how many minutes before it that session's last response is (default: a
+   * few seconds, so it is still running).
+   */
+  liveEndMinutes?: number;
+  /** With `liveAt`: 2 sessions (default), or only the first one. */
+  liveSessions?: 1 | 2;
 }
 
 /** Seeded random numbers in [0, 1) (mulberry32). */

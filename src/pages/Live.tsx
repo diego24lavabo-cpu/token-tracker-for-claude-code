@@ -1,15 +1,19 @@
 import { FolderSearch } from 'lucide-react';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
+import { LIVE_MIN_VERSION } from '../../shared/sync';
 import type {
   Live as LiveData,
+  LiveBurn,
   LiveEstimate,
   LiveHours,
   LiveMachine,
   LiveReference,
   LiveReferenceChoice,
   LiveReferenceInfo,
+  LiveStatus,
   LiveWindow,
+  LocalDayTime,
 } from '../../shared/types';
 import { EmptyState } from '../components/EmptyState';
 import { KpiCard } from '../components/KpiCard';
@@ -55,17 +59,19 @@ export function Live() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `refresh` is the reload trigger
     [machineId, hours, refresh],
   );
-  const { data } = useUsageQuery(fetchLive);
+  const { data } = useUsageQuery(fetchLive, { live: true });
 
   useEffect(() => {
     const timer = setInterval(() => setRefresh((count) => count + 1), REFRESH_MS);
     return () => clearInterval(timer);
   }, []);
 
-  // The main machine shown at the top: this computer, or the one picked in the header.
-  const machine = data?.machines[0] ?? null;
+  // The top of the page: every computer together under "All" while their live data is
+  // fresh, else this computer or the one picked in the header.
+  const line = data ? topLine(data, machineId === ALL_MACHINES) : null;
+  const estimate = data?.estimate ?? null;
   // Claude's own reset time when its % is in use, else the rebuilt window's.
-  const windowEnd = machine?.estimate?.resetsAt ?? machine?.window?.end ?? null;
+  const windowEnd = estimate?.resetsAt ?? line?.window?.end ?? null;
   useEffect(() => {
     if (windowEnd === null) return;
     const delay = windowEnd - Date.now() + 1_000;
@@ -89,7 +95,7 @@ export function Live() {
     );
   }
 
-  const running = machine?.status === 'active' ? machine : null;
+  const running = line?.status === 'active' ? line : null;
 
   return (
     <Page section="live" periodIgnored={t.periodIgnored}>
@@ -103,14 +109,21 @@ export function Live() {
           )}
         </div>
       )}
-      {data && machine && !running ? <IdleCard machine={machine} /> : <KpiRow machine={running} />}
+      {line && !running ? (
+        <IdleCard line={line} />
+      ) : (
+        <KpiRow
+          line={running}
+          estimate={estimate}
+          counted={data?.reference.scope.counted.length ?? 0}
+          accountRunning={data?.reference.canCalibrate ?? false}
+        />
+      )}
       <div className="live-layout">
         <ChartCard data={data} hours={hours} onHours={setHours} current={running?.window ?? null} />
         <div className="live-side">
           <ActiveCard data={data} />
-          {data && machine?.isLocal && (
-            <ReferenceCard info={data.reference} demo={info?.demo ?? false} />
-          )}
+          {data && <ReferenceCard info={data.reference} demo={info?.demo ?? false} />}
           {data && data.machines.length > 1 && <MachinesCard machines={data.machines} />}
         </div>
       </div>
@@ -121,10 +134,54 @@ export function Live() {
 
 // ── Window ────────────────────────────────────────────────────────────────────
 
-function KpiRow({ machine }: { machine: LiveMachine | null }) {
+/** A window and speed at the top of the page: one machine's, or every computer's together. */
+interface TopLine {
+  status: LiveStatus;
+  window: LiveWindow | null;
+  previous: LiveWindow | null;
+  burn: LiveBurn;
+  /** The machine's name; null for every computer together. */
+  name: string | null;
+  /** Another computer: when its live data was written. */
+  liveAtTime: LocalDayTime | null;
+  /** How many computers it counts. */
+  computers: number;
+}
+
+function topLine(data: LiveData, all: boolean): TopLine | null {
+  if (all && data.combined) {
+    return {
+      ...data.combined,
+      name: null,
+      liveAtTime: null,
+      computers: data.combined.machines.length,
+    };
+  }
+  const machine = data.machines[0];
+  return machine ? { ...machine, computers: 1 } : null;
+}
+
+/**
+ * `counted`: how many other computers the estimate counts. `accountRunning`: the
+ * account's window is running (with usage), whichever machine is shown.
+ */
+function KpiRow({
+  line,
+  estimate,
+  counted,
+  accountRunning,
+}: {
+  line: TopLine | null;
+  estimate: LiveEstimate | null;
+  counted: number;
+  accountRunning: boolean;
+}) {
+  // Without an estimate: no reference to compare with, or no account window running.
+  const missing = accountRunning ? t.kpi.usageNone : t.kpi.usageNoWindow;
   const now = useNow();
-  const current = machine?.window ?? null;
+  const current = line?.window ?? null;
   const k = t.kpi;
+  const all = line !== null && line.computers > 1;
 
   return (
     <div className="kpi-grid kpi-grid--5">
@@ -132,20 +189,31 @@ function KpiRow({ machine }: { machine: LiveMachine | null }) {
         <KpiCard
           label={k.window}
           value={formatTokens(current.total)}
-          hint={k.windowHint(current.startAt.time, formatCost(costOf(current)))}
-          title={k.windowTitle}
+          hint={
+            all
+              ? k.windowHintAll(current.startAt.time, line.computers, formatCost(costOf(current)))
+              : k.windowHint(current.startAt.time, formatCost(costOf(current)))
+          }
+          title={all ? k.windowTitleAll : k.windowTitle}
         />
       ) : (
         <KpiCard label={k.window} value={NO_VALUE} hint={NO_VALUE} title={k.windowTitle} />
       )}
       {current ? (
-        <ResetsCard window={current} estimate={machine?.estimate ?? null} />
+        <ResetsCard window={current} estimate={estimate} />
       ) : (
         <KpiCard label={k.resets} value={NO_VALUE} hint={NO_VALUE} title={k.resetsTitle} />
       )}
-      <SpeedCard machine={machine} />
-      <UsageCard machine={machine} />
-      <LimitCard machine={machine} now={now} />
+      <SpeedCard burn={line?.burn ?? null} />
+      <UsageCard estimate={estimate} missing={line ? missing : null} />
+      <LimitCard
+        estimate={estimate}
+        burn={line?.burn ?? null}
+        missing={missing}
+        // One computer shown, the speed of all of them counted.
+        otherSpeed={line !== null && line.name !== null && counted > 0}
+        now={now}
+      />
     </div>
   );
 }
@@ -183,10 +251,9 @@ function ResetsCard({
   );
 }
 
-function SpeedCard({ machine }: { machine: LiveMachine | null }) {
+function SpeedCard({ burn }: { burn: LiveBurn | null }) {
   const k = t.kpi;
-  const burn = machine?.burn;
-  const moving = burn !== undefined && burn.tokensPerMinute > 0;
+  const moving = burn !== null && burn.tokensPerMinute > 0;
   return (
     <KpiCard
       label={k.speed}
@@ -217,26 +284,45 @@ function referenceHint(reference: LiveReference): string {
   }
 }
 
-function UsageCard({ machine }: { machine: LiveMachine | null }) {
+/** The account's estimate, whichever machine is shown. `shown`: a window is on screen. */
+/** `missing`: why there is no estimate; null when no window is shown. */
+function UsageCard({
+  estimate,
+  missing,
+}: {
+  estimate: LiveEstimate | null;
+  missing: string | null;
+}) {
   const k = t.kpi;
-  const estimate = machine?.estimate ?? null;
   return (
     <KpiCard
       label={k.usage}
       value={estimate ? formatPercent(estimate.percent / 100) : NO_VALUE}
-      hint={estimate ? referenceHint(estimate.reference) : machine ? k.usageNone : NO_VALUE}
+      hint={estimate ? referenceHint(estimate.reference) : (missing ?? NO_VALUE)}
       title={k.usageTitle}
     />
   );
 }
 
-function LimitCard({ machine, now }: { machine: LiveMachine | null; now: number }) {
+/** The account's estimate; `burn` is the shown window's speed (null: no window shown). */
+function LimitCard({
+  estimate,
+  burn,
+  missing,
+  otherSpeed,
+  now,
+}: {
+  estimate: LiveEstimate | null;
+  burn: LiveBurn | null;
+  missing: string;
+  otherSpeed: boolean;
+  now: number;
+}) {
   const k = t.kpi;
-  const estimate = machine?.estimate ?? null;
   const title = k.limitTitle;
-  if (!machine) return <KpiCard label={k.limit} value={NO_VALUE} hint={NO_VALUE} title={title} />;
+  if (!burn) return <KpiCard label={k.limit} value={NO_VALUE} hint={NO_VALUE} title={title} />;
   if (!estimate) {
-    return <KpiCard label={k.limit} value={NO_VALUE} hint={k.usageNone} title={title} />;
+    return <KpiCard label={k.limit} value={NO_VALUE} hint={missing} title={title} />;
   }
   switch (estimate.outcome) {
     case 'limitFirst':
@@ -245,7 +331,9 @@ function LimitCard({ machine, now }: { machine: LiveMachine | null; now: number 
           label={k.limit}
           value={estimate.limitAt === null ? NO_VALUE : k.limitAt(formatClock(estimate.limitAt))}
           hint={
-            estimate.limitAt === null ? NO_VALUE : k.limitIn(formatDuration(estimate.limitAt - now))
+            estimate.limitAt === null
+              ? NO_VALUE
+              : (otherSpeed ? k.limitInAll : k.limitIn)(formatDuration(estimate.limitAt - now))
           }
           title={title}
         />
@@ -272,27 +360,45 @@ function LimitCard({ machine, now }: { machine: LiveMachine | null; now: number 
       );
     case 'noRate':
       return (
-        <KpiCard
-          label={k.limit}
-          value={NO_VALUE}
-          hint={k.speedIdle(machine.burn.minutes)}
-          title={title}
-        />
+        <KpiCard label={k.limit} value={NO_VALUE} hint={k.speedIdle(burn.minutes)} title={title} />
       );
     case 'noLimit':
       return <KpiCard label={k.limit} value={NO_VALUE} hint={k.limitUnknown} title={title} />;
   }
 }
 
-/** Shown instead of the KPI row when no window is running. */
-function IdleCard({ machine }: { machine: LiveMachine }) {
-  const previous = machine.previous;
-  const noLive = machine.status === 'noLiveData';
+/** A day and time as the page writes them: the time alone today, else with the day. */
+function when(at: LocalDayTime, today: string): string {
+  return at.day === today ? at.time : dayTime(at);
+}
+
+/** Shown instead of the KPI row when no window is running, or nothing is known of one. */
+function IdleCard({ line }: { line: TopLine }) {
+  const today = useToday();
+  const name = line.name ?? '';
+  const previous = line.previous;
+  const i = t.idle;
+  let title: string = i.title;
+  // Every computer together: no window on any of them.
+  let body: string = line.name === null ? i.bodyAll : i.body;
+  if (line.status === 'noLiveData' || line.status === 'needsUpdate' || line.status === 'newerApp') {
+    title = i.noLive(name);
+    body =
+      line.status === 'needsUpdate'
+        ? i.needsUpdateBody(LIVE_MIN_VERSION)
+        : line.status === 'newerApp'
+          ? i.newerAppBody
+          : i.noLiveBody;
+  } else if (line.status === 'stale') {
+    title = line.liveAtTime ? i.stale(name, when(line.liveAtTime, today)) : i.noLive(name);
+    body = i.staleBody;
+  }
+  const known = line.status === 'idle' || line.status === 'noData';
   return (
     <section className="card live-idle">
-      <h2 className="card-title">{noLive ? t.idle.noLive(machine.name) : t.idle.title}</h2>
-      <p className="live-idle-body">{noLive ? t.idle.noLiveBody : t.idle.body}</p>
-      {!noLive && previous && (
+      <h2 className="card-title">{title}</h2>
+      <p className="live-idle-body">{body}</p>
+      {known && previous && (
         <p className="live-idle-last num">
           {t.idle.last(
             `${formatDay(previous.startAt.day)}, ${previous.startAt.time}`,
@@ -422,6 +528,17 @@ function dayTime(at: LiveWindow['startAt']): string {
   return `${formatDay(at.day)}, ${at.time}`;
 }
 
+/** The largest window, and with other computers whose window it is. */
+function largestLine(info: LiveReferenceInfo): string {
+  const r = t.reference;
+  const largest = info.largest;
+  if (!largest) return r.noLargest;
+  const line = r.largestLine(formatDay(largest.startAt.day), formatCost(largest.units));
+  if (info.scope.others === 0) return line;
+  const whose = largest.computers > 1 ? r.computers(largest.computers) : r.largestThis;
+  return `${line} · ${whose}`;
+}
+
 /**
  * What the estimates take as 100%: Claude's own % while current, else the choice between
  * the largest window and a calibration, which is entered here.
@@ -458,7 +575,7 @@ function ReferenceCard({ info, demo }: { info: LiveReferenceInfo; demo: boolean 
           )
         : r.claudeStale(formatPercent(claude.percent / 100), dayTime(claude.fetchedAtTime));
 
-  const calibrationLine = !calibration
+  const calibrationText = !calibration
     ? r.noCalibration
     : calibration.units === null
       ? r.calibrationLost(formatPercent(calibration.percent / 100), dayTime(calibration.atTime))
@@ -467,6 +584,17 @@ function ReferenceCard({ info, demo }: { info: LiveReferenceInfo; demo: boolean 
           dayTime(calibration.atTime),
           formatCost(calibration.units),
         );
+  // With other computers: whose usage the calibration counted.
+  const calibrationLine =
+    calibration && info.scope.others > 0
+      ? `${calibrationText} · ${calibration.computers > 1 ? r.computers(calibration.computers) : r.calibrationLocal}`
+      : calibrationText;
+  const scopeLine =
+    info.scope.others === 0
+      ? null
+      : info.scope.counted.length > 0
+        ? r.scopeAll(info.scope.counted.join(', '))
+        : r.scopeLocal;
 
   const options: SegmentedOption<LiveReferenceChoice>[] = [
     { value: 'largestWindow', label: r.largest },
@@ -526,6 +654,7 @@ function ReferenceCard({ info, demo }: { info: LiveReferenceInfo; demo: boolean 
       >
         {claudeLine}
       </p>
+      {scopeLine && <p className="live-reference-scope">{scopeLine}</p>}
       <div className="live-reference-choice">
         <span className="live-reference-label">{r.choice}</span>
         <SegmentedControl
@@ -539,11 +668,7 @@ function ReferenceCard({ info, demo }: { info: LiveReferenceInfo; demo: boolean 
         />
       </div>
       <ul className="live-reference-lines">
-        <li>
-          {info.largest
-            ? r.largestLine(formatDay(info.largest.startAt.day), formatCost(info.largest.units))
-            : r.noLargest}
-        </li>
+        <li>{info.largest ? largestLine(info) : r.noLargest}</li>
         <li>{calibrationLine}</li>
       </ul>
       <form className="live-calibrate" onSubmit={(event) => void submit(event)}>
@@ -580,11 +705,24 @@ function ReferenceCard({ info, demo }: { info: LiveReferenceInfo; demo: boolean 
 /** One line per machine, for the machines selected in the header. */
 function MachinesCard({ machines }: { machines: LiveMachine[] }) {
   const m = t.machines;
+  const today = useToday();
   const status = (machine: LiveMachine) => {
-    if (machine.status === 'active' && machine.window) return m.active(machine.window.endAt.time);
-    if (machine.status === 'noLiveData') return m.noLive;
-    if (machine.status === 'noData') return m.noData;
-    return m.idle;
+    switch (machine.status) {
+      case 'active':
+        return machine.window ? m.active(machine.window.endAt.time) : m.idle;
+      case 'noLiveData':
+        return m.noLive;
+      case 'needsUpdate':
+        return m.needsUpdate(LIVE_MIN_VERSION);
+      case 'newerApp':
+        return m.newerApp;
+      case 'stale':
+        return machine.liveAtTime ? m.stale(when(machine.liveAtTime, today)) : m.noLive;
+      case 'noData':
+        return m.noData;
+      case 'idle':
+        return m.idle;
+    }
   };
 
   return (

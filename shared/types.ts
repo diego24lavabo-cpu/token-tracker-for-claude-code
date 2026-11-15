@@ -763,7 +763,8 @@ export interface LiveBurn {
 
 /**
  * What the estimates take as 100%:
- * - `largestWindow`: the past window with the most units (not the real limit).
+ * - `largestWindow`: the past window with the most units (not the real limit): this
+ *   computer's, or one of several computers together that this app saw finish.
  * - `calibration`: the % that Claude's `/usage` showed, entered by the user: the limit is
  *   the window's units at that moment ÷ that %.
  * - `claude`: Claude Code's own 5-hour % (`cachedUsageUtilization` in `~/.claude.json`),
@@ -777,8 +778,9 @@ export type LiveReferenceChoice = 'largestWindow' | 'calibration';
 export interface LiveReference {
   kind: LiveReferenceKind;
   /**
-   * The limit (100%) in API-price units. Under `claude`, derived from Claude's % and this
-   * machine's units at that moment, else the chosen reference's; null when neither exists.
+   * The limit (100%) in API-price units. Under `claude`, derived from Claude's % and the
+   * units counted at that moment (every computer with fresh live data, else this one), else
+   * the chosen reference's; null when neither exists.
    */
   units: number | null;
   /**
@@ -835,31 +837,52 @@ export interface LiveCalibration {
   percent: number;
   /** The limit it gives, in API-price units; null when its window is no longer found. */
   units: number | null;
+  /**
+   * The computers whose usage it counted: 1 for this one only, more when other computers'
+   * live data was fresh when it was entered.
+   */
+  computers: number;
+}
+
+/** Whose usage the estimate and the limits count. */
+export interface LiveScope {
+  /** The other computers whose live data is fresh, so counted. Empty: this computer only. */
+  counted: string[];
+  /** How many other computers there are (hidden ones left out). */
+  others: number;
 }
 
 /** The reference settings and sources, for the Live page's reference card. */
 export interface LiveReferenceInfo {
   choice: LiveReferenceChoice;
-  /** The finished window with the most units, or null. */
-  largest: { start: number; startAt: LocalDayTime; units: number } | null;
+  /**
+   * The finished window with the most units known, or null: this computer's, or one of
+   * several computers together that this app saw finish (`computers` above 1).
+   */
+  largest: { start: number; startAt: LocalDayTime; units: number; computers: number } | null;
   calibration: LiveCalibration | null;
   /** False when reading Claude Code's numbers is turned off in Settings. */
   claudeEnabled: boolean;
   /** Claude Code's last numbers (null when off, missing or unreadable). */
   claude: (ClaudeUsage & { fetchedAtTime: LocalDayTime; fresh: boolean }) | null;
-  /** True when a window is running on this machine, so a calibration can be entered. */
+  /** True when the account's window is running with usage, so a calibration can be entered. */
   canCalibrate: boolean;
+  scope: LiveScope;
 }
 
 /**
  * - `active`: a window is running.
  * - `idle`: the last window has reset; the next response starts a new one.
  * - `noData`: no usage at all on this machine.
- * - `noLiveData`: no response times from this machine (another computer).
+ * - `noLiveData`: another computer that has not shared live data (`live.json`).
+ * - `stale`: another computer whose live data is older than 15 minutes (`liveAt`).
+ * - `needsUpdate`: another computer whose app is too old to share live data.
+ * - `newerApp`: another computer whose live data needs a newer version of this app.
  */
-export type LiveStatus = 'active' | 'idle' | 'noData' | 'noLiveData';
+export type LiveStatus =
+  'active' | 'idle' | 'noData' | 'noLiveData' | 'stale' | 'needsUpdate' | 'newerApp';
 
-/** One machine's 5-hour window. */
+/** One machine's 5-hour window. Another computer's comes from its `live.json`. */
 export interface LiveMachine {
   machineId: string;
   name: string;
@@ -874,8 +897,24 @@ export interface LiveMachine {
   lastResponse: number | null;
   lastResponseAt: LocalDayTime | null;
   burn: LiveBurn;
-  /** Null without a running window or without a finished window to compare with. */
-  estimate: LiveEstimate | null;
+  /** Another computer: when its live data was written, epoch milliseconds; else null. */
+  liveAt: number | null;
+  liveAtTime: LocalDayTime | null;
+}
+
+/**
+ * The window of every computer together (decision: the limit is per account): the
+ * responses of this computer and of the others whose live data is fresh, chained into
+ * one series of 5-hour windows.
+ */
+export interface LiveCombined {
+  status: 'active' | 'idle';
+  window: LiveWindow | null;
+  /** The last window that has reset, when the live data covers all of it; else null. */
+  previous: LiveWindow | null;
+  burn: LiveBurn;
+  /** The computers with usage in its window (the last one when none runs), this one first. */
+  machines: { machineId: string; name: string }[];
 }
 
 export interface Live {
@@ -892,6 +931,16 @@ export interface Live {
   active: LiveProject[];
   /** The selected machines, this one first. */
   machines: LiveMachine[];
+  /**
+   * Every computer together, whatever the selection, when another computer's live data
+   * is fresh; null otherwise. The page shows it on top under "All".
+   */
+  combined: LiveCombined | null;
+  /**
+   * Where the account stands against its limit: on `combined` when there is one, else on
+   * this computer's window. Null without a running window or a reference.
+   */
+  estimate: LiveEstimate | null;
   reference: LiveReferenceInfo;
 }
 
@@ -1153,4 +1202,6 @@ export interface Api {
   onUsageUpdated(callback: () => void): () => void;
   /** Subscribes to "sync status changed" events (no usage change). */
   onSyncUpdated(callback: () => void): () => void;
+  /** Subscribes to "another computer's live data changed" events (the Live page only). */
+  onLiveUpdated(callback: () => void): () => void;
 }

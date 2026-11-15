@@ -10,12 +10,17 @@
 //
 // The second computer is scanned into its own in-memory database and writes its sync files
 // like a real one, so the Machines page, the machine selector and the title bar show sync.
+// With `liveAt` it also writes a `live.json` once: its session started before this
+// machine's and stopped before this one began, so the combined window starts on it. The
+// Live page shows every computer together until that file goes stale (15 minutes).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { generateDemoData } from '../scripts/demo-data.mjs';
 import type { Platform } from '../shared/types';
 import { UsageDatabase } from './db';
+import { buildLiveFile } from './live';
+import { DEFAULT_PRICING } from './pricing';
 import { scanLogs } from './scanner';
 import { SyncService } from './sync';
 import { SYNC_FOLDER_NAME } from './syncFormat';
@@ -109,8 +114,10 @@ export interface DemoWorldSize {
   /** Days of logs on the second computer (default four months). */
   otherDays?: number;
   /**
-   * The current time, epoch milliseconds. When set, this machine also has a session running
-   * at that time, so the Live page shows a running window (default: none).
+   * The current time, epoch milliseconds. When set, this machine has a session running at
+   * that time and the second computer one that started earlier and stopped, so the Live
+   * page shows a running window, and the second computer writes its `live.json` (default:
+   * none).
    */
   liveAt?: number;
 }
@@ -136,6 +143,10 @@ export async function generateDemoWorld(
     projects: ['demo-app', 'web-shop', 'infra-scripts'],
     sessionsPerDay: [1, 2],
     dayOffRate: 0.35,
+    liveAt,
+    liveStartMinutes: 230,
+    liveEndMinutes: 185,
+    liveSessions: 1,
   });
   fs.mkdirSync(path.dirname(env.syncFolder), { recursive: true });
 
@@ -147,6 +158,11 @@ export async function generateDemoWorld(
     serial: <T>(task: () => T | Promise<T>) => Promise.resolve().then(task),
     onDataChanged: () => undefined,
     onStatusChanged: () => undefined,
+    liveFile:
+      liveAt === undefined
+        ? undefined
+        : (database, now) => buildLiveFile(database, DEFAULT_PRICING, now),
+    now: liveAt === undefined ? undefined : () => liveAt,
   });
   try {
     await scanLogs(db, [otherRoot]);

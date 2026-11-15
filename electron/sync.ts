@@ -15,6 +15,9 @@
  * - A machine deleted in Settings leaves a tombstone with its last sync: its old files are
  *   ignored, a later sync brings it back. Deleted with its Drive folder, it is also listed
  *   in this machine's `deleted.json`, and the other computers delete it in turn.
+ * - `live.json` (the Live page's last hours, see `liveFormat.ts`) is rewritten at most once
+ *   a minute while this machine is in use and every 5 minutes as a heartbeat. The others'
+ *   are read by the same 30 s poll and kept in memory only, the last good copy of each.
  */
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -24,6 +27,14 @@ import { aliasMap } from '../shared/projects';
 import type { DriveCandidate, Platform, SyncMachine, SyncStatus } from '../shared/types';
 import { syncedSince, type UsageDatabase } from './db';
 import { accountFromLabel, findDriveRoots, windowsVolumeLabels, type DriveRoot } from './drive';
+import {
+  LIVE_HEARTBEAT_MS,
+  LIVE_WRITE_INTERVAL_MS,
+  MAX_LIVE_FILE_BYTES,
+  parseLiveFile,
+  serializeLiveFile,
+  type LiveFile,
+} from './liveFormat';
 import { tildify } from './paths';
 import {
   buildYearFiles,
@@ -31,6 +42,7 @@ import {
   DELETIONS_FILE,
   GZIP_THRESHOLD,
   isMachineId,
+  LIVE_FILE,
   MACHINE_FILE,
   MACHINES_FOLDER,
   MAX_DELETIONS,
@@ -80,6 +92,18 @@ export interface SyncHost {
   onDataChanged(): void;
   /** The sync status changed (title bar, Settings). */
   onStatusChanged(): void;
+  /**
+   * This machine's `live.json` at `now`. Without it, no `live.json` is written (the other
+   * machines' are still read).
+   */
+  liveFile?(db: UsageDatabase, now: number): LiveFile;
+  /**
+   * False when this machine's logs are not watched, so its live data is only as current as
+   * the last scan: the heartbeat then stops, and the file goes stale honestly. Default true.
+   */
+  liveCurrent?(): boolean;
+  /** Another machine's live data changed: the Live page must refresh. */
+  onLiveChanged?(): void;
   now?(): number;
 }
 
@@ -162,7 +186,18 @@ const signature = (stat: { size: number; mtimeMs: number }) => `${stat.size}:${s
 export class SyncService {
   private exportTimer: ReturnType<typeof setTimeout> | null = null;
   private readTimer: ReturnType<typeof setInterval> | null = null;
+  private liveTimer: ReturnType<typeof setTimeout> | null = null;
   private lastWriteAt = 0;
+  /** When `live.json` was last written (or failed to be). */
+  private lastLiveWriteAt = Number.NEGATIVE_INFINITY;
+  /** The last `live.json` write failed: said once until one succeeds. */
+  private liveFailing = false;
+  /** Each other machine's last good `live.json`, with the file signature it was read at. */
+  private live = new Map<string, { file: LiveFile; signature: string }>();
+  /** Why each machine's latest `live.json` could not be used, said once per reason. */
+  private liveRefused = new Map<string, ParseFailure>();
+  /** Set by a read that changed `live`. */
+  private liveChanged = false;
   private reading = false;
   /** Null until the first read or write: then whether the folder could be reached. */
   private reachable: boolean | null = null;
@@ -209,6 +244,11 @@ export class SyncService {
     if (!on) {
       this.stop();
       this.reachable = null;
+      if (this.live.size + this.liveRefused.size > 0) {
+        this.live.clear();
+        this.liveRefused.clear();
+        this.host.onLiveChanged?.();
+      }
       this.host.onStatusChanged();
       return;
     }
@@ -232,6 +272,10 @@ export class SyncService {
     this.failed.clear();
     this.machineFiles.clear();
     this.deletionFiles.clear();
+    const hadLive = this.live.size + this.liveRefused.size > 0;
+    this.live.clear();
+    this.liveRefused.clear();
+    if (hadLive) this.host.onLiveChanged?.();
     this.host.onStatusChanged();
   }
 
@@ -267,15 +311,19 @@ export class SyncService {
   stop(): void {
     if (this.readTimer) clearInterval(this.readTimer);
     if (this.exportTimer) clearTimeout(this.exportTimer);
+    if (this.liveTimer) clearTimeout(this.liveTimer);
     this.readTimer = null;
     this.exportTimer = null;
+    this.liveTimer = null;
   }
 
   /** Writes what is pending before the app quits. Synchronous: the database closes next. */
   flushOnQuit(): void {
     const pending = this.exportTimer !== null;
+    const livePending = this.liveTimer !== null;
     this.stop();
     if (pending) this.writeOwnFiles(false);
+    if (livePending) this.writeLive();
   }
 
   /**
@@ -295,12 +343,30 @@ export class SyncService {
     }, due - this.now());
   }
 
+  /**
+   * This machine's responses changed: `live.json` is written at once, or a minute after its
+   * previous write. Also the heartbeat, every 5 minutes while the app runs.
+   */
+  liveDataChanged(): void {
+    if (!this.enabled || !this.folder || !this.host.liveFile || this.liveTimer) return;
+    const due = Math.max(this.now(), this.lastLiveWriteAt + LIVE_WRITE_INTERVAL_MS);
+    this.liveTimer = setTimeout(() => {
+      this.liveTimer = null;
+      // Counted from now: a change while the write waits behind a scan waits a minute more.
+      this.lastLiveWriteAt = this.now();
+      void this.host.serial(() => this.writeLive());
+    }, due - this.now());
+  }
+
   /** Writes this machine's files and reads the others' now. */
   async syncNow(): Promise<void> {
     if (!this.enabled || !this.folder) return;
     if (this.exportTimer) clearTimeout(this.exportTimer);
+    if (this.liveTimer) clearTimeout(this.liveTimer);
     this.exportTimer = null;
+    this.liveTimer = null;
     await this.host.serial(() => this.writeOwnFiles(true));
+    await this.host.serial(() => this.writeLive());
     await this.readNow();
   }
 
@@ -369,6 +435,36 @@ export class SyncService {
     }
   }
 
+  /**
+   * Writes `live.json`. Returns false when it could not be written (said once until a
+   * write succeeds); the next change or heartbeat tries again.
+   */
+  writeLive(): boolean {
+    const db = this.host.database();
+    const folder = this.folder;
+    const build = this.host.liveFile;
+    if (!db || !folder || !this.enabled || !build) return false;
+    const now = this.now();
+    this.lastLiveWriteAt = now;
+    // As for the year files: never create a Drive folder that Drive does not sync.
+    if (!exists(path.dirname(folder))) return this.liveWriteFailed('the Drive folder is missing');
+    try {
+      const machineDir = path.join(folder, MACHINES_FOLDER, db.machineId);
+      fs.mkdirSync(machineDir, { recursive: true });
+      writeAtomic(path.join(machineDir, LIVE_FILE), serializeLiveFile(build(db, now)));
+      this.liveFailing = false;
+      return true;
+    } catch (error) {
+      return this.liveWriteFailed(errorCode(error));
+    }
+  }
+
+  private liveWriteFailed(reason: string): false {
+    if (!this.liveFailing) console.warn(`[sync] Could not write live.json: ${reason}`);
+    this.liveFailing = true;
+    return false;
+  }
+
   private writeFailedNow(): boolean {
     this.writeFailed = true;
     return this.markReachable(false);
@@ -432,6 +528,7 @@ export class SyncService {
   async readNow(): Promise<void> {
     if (this.reading || !this.enabled || !this.folder) return;
     this.reading = true;
+    this.liveChanged = false;
     try {
       await this.readOnce();
     } catch (error) {
@@ -439,6 +536,11 @@ export class SyncService {
     } finally {
       this.reading = false;
     }
+    if (this.liveChanged) this.host.onLiveChanged?.();
+    // The heartbeat: the others can tell this machine is idle rather than gone. Not while its
+    // logs are not watched: the numbers are then only as current as the last scan.
+    const current = this.host.liveCurrent?.() ?? true;
+    if (current && this.now() - this.lastLiveWriteAt >= LIVE_HEARTBEAT_MS) this.liveDataChanged();
     // A machine that has been idle still tells the others it is alive.
     const db = this.host.database();
     const lastSync = db?.listAllMachines().find((machine) => machine.isLocal)?.lastSync;
@@ -487,6 +589,12 @@ export class SyncService {
       if (!seen.has(machine.id)) this.problems.set(machine.id, 'missing');
       else if (this.problems.get(machine.id) === 'missing') this.problems.delete(machine.id);
     }
+    // The live data of a folder gone (deleted by hand) or of a machine hidden is forgotten.
+    for (const id of [...this.live.keys(), ...this.liveRefused.keys()]) {
+      if (seen.has(id) && !db.isMachineHidden(id)) continue;
+      if (this.live.delete(id)) this.liveChanged = true;
+      if (this.liveRefused.delete(id)) this.liveChanged = true;
+    }
     this.markReachable(true);
     if (dataChanged) this.host.onDataChanged();
   }
@@ -506,6 +614,7 @@ export class SyncService {
     const years = new Map<number, { name: string; size: number; mtimeMs: number }>();
     let machineStat: { size: number; mtimeMs: number } | null = null;
     let deletionsStat: { size: number; mtimeMs: number } | null = null;
+    let liveStat: { size: number; mtimeMs: number } | null = null;
 
     for (const name of names) {
       const kind = classifySyncFile(name);
@@ -525,6 +634,10 @@ export class SyncService {
       }
       if (kind.kind === 'deletions') {
         deletionsStat = stat;
+        continue;
+      }
+      if (kind.kind === 'live') {
+        liveStat = stat;
         continue;
       }
       // `2026.json` and `2026.json.gz` both present: the newer one wins.
@@ -581,6 +694,7 @@ export class SyncService {
       this.setProblem(id, problem);
       return false;
     }
+    await this.readLive(dir, id, liveStat);
 
     const stored = db.remoteFileStates();
     const updates: {
@@ -646,6 +760,68 @@ export class SyncService {
   }
 
   /**
+   * Reads another machine's `live.json` when it changed. A file that cannot be parsed
+   * (Drive may still be downloading it) keeps the last good copy, which goes stale in time;
+   * it is only logged, never a problem of the machine's numbers. A file gone is forgotten.
+   */
+  private async readLive(
+    dir: string,
+    id: string,
+    stat: { size: number; mtimeMs: number } | null,
+  ): Promise<void> {
+    if (!stat) {
+      if (this.live.delete(id)) this.liveChanged = true;
+      if (this.liveRefused.delete(id)) this.liveChanged = true;
+      return;
+    }
+    const known = this.live.get(id);
+    const key = `${id}/${LIVE_FILE}`;
+    if (known?.signature === signature(stat) || this.failed.get(key) === signature(stat)) return;
+    const folder = this.folder;
+    const text =
+      stat.size > MAX_LIVE_FILE_BYTES
+        ? null
+        : await this.readText(path.join(dir, LIVE_FILE), stat.size);
+    // The folder changed, or sync was turned off, during the read: the file is not ours any more.
+    if (this.folder !== folder || !this.enabled) return;
+    const parsed = text === null ? null : parseLiveFile(text, id);
+    if (parsed?.ok) {
+      this.failed.delete(key);
+      if (parsed.skippedRows > 0) {
+        console.warn(`[sync] Skipped ${parsed.skippedRows} malformed row(s) in ${key}`);
+      }
+      this.live.set(id, { file: parsed.value, signature: signature(stat) });
+      this.liveRefused.delete(id);
+      this.liveChanged = true;
+      return;
+    }
+    // Rewritten every minute: said once per reason, not at every new copy.
+    const reason = parsed ? parsed.reason : 'json';
+    this.failed.set(key, signature(stat));
+    if (this.liveRefused.get(id) !== reason) {
+      console.warn(`[sync] Kept the last good copy of ${key}: ${reason}`);
+      if (reason === 'newerVersion' || this.liveRefused.get(id) === 'newerVersion') {
+        this.liveChanged = true;
+      }
+      this.liveRefused.set(id, reason);
+    }
+  }
+
+  /** The other machines whose latest `live.json` needs a newer version of this app. */
+  liveNewer(): string[] {
+    if (!this.enabled) return [];
+    return [...this.liveRefused]
+      .filter(([, reason]) => reason === 'newerVersion')
+      .map(([id]) => id);
+  }
+
+  /** The other machines' last good `live.json` files; none while sync is off. */
+  liveFiles(): LiveFile[] {
+    if (!this.enabled) return [];
+    return [...this.live.values()].map((entry) => entry.file);
+  }
+
+  /**
    * Deletes the machines other computers deleted with their Drive folder, unless one
    * synced since. A machine not seen yet gets a tombstone too, so its old files stay out.
    * This machine is never deleted. True when a known machine was deleted. Runs on the chain.
@@ -674,6 +850,8 @@ export class SyncService {
     this.conflicts.delete(machineId);
     this.machineFiles.delete(machineId);
     this.deletionFiles.delete(machineId);
+    const hadLive = this.live.delete(machineId);
+    if (this.liveRefused.delete(machineId) || hadLive) this.host.onLiveChanged?.();
     for (const key of [...this.failed.keys()]) {
       if (key.startsWith(`${machineId}/`)) this.failed.delete(key);
     }

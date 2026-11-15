@@ -344,12 +344,23 @@ ClaudeTokenTracker/
 │  ├─ <machineId>/
 │  │  ├─ machine.json      # { machineId, name, platform, appVersion, schemaVersion, lastSync }
 │  │  ├─ 2026.json         # aggregates for that year
-│  │  └─ 2027.json
+│  │  ├─ 2027.json
+│  │  ├─ deleted.json      # machines this one deleted with their Drive folder
+│  │  └─ live.json         # the Live page: last hours minute by minute (see below)
 │  └─ <otherMachineId>/…
 └─ README.txt              # short explanation, rewritten when its version line is older
 ```
 
 - `machineId` = a random UUID created on first launch and stored locally. `name` is editable in Settings (default: the hostname).
+- `live.json` (Live page, `electron/liveFormat.ts`), times in epoch ms (UTC), token counts only (the reader prices them):
+```json
+{"schemaVersion":1,"machineId":"…","writtenAt":0,"minutesFrom":0,"activityFrom":0,
+"window":{"start":0,"last":0,"responses":12,"models":[["Opus 5.5",1200,540,8800,41000,0]]},
+"previous":null,
+"activity":[[firstMs,lastMs]],
+"minutes":[[firstMs,lastMs,"demo-app","Opus 5.5",1200,540,8800,41000,0,7]]}
+```
+  `minutes`: one row per minute, project and model over the last 6 hours. `activity`: the responses of the last 24 hours as runs in which no two responses are more than a minute apart (to chain several computers' windows). `window` / `previous`: the writer's running and last reset 5-hour windows, with tokens per model (not its largest: one computer's own window can span two of the account's windows).
 - `<year>.json` (compact, versioned):
 ```json
 {
@@ -378,11 +389,13 @@ ClaudeTokenTracker/
 - **Atomic write**: write `2026.json.tmp`, then rename it to `2026.json`.
 - Write after each local re-scan that changes something (debounce 60 s), at most once every 5 min, plus on app quit.
 - Only rewrite the years that changed. Update `machine.json.lastSync` on every write.
+- `live.json`: at most once a minute while new responses arrive, every 5 minutes as a heartbeat while the app runs, only while sync is on.
 
 ### Read and merge rules
 - Watch `machines/*/` with chokidar in polling mode (**30 s interval**), because Drive folders on Windows sometimes miss native events.
 - Ignore broken or partial JSON (Drive may still be downloading). Keep the last good version and retry later.
-- Ignore Drive conflict copies (`2026 (1).json` etc.) and log them.
+- Ignore Drive conflict copies (`2026 (1).json`, `live (1).json` etc.) and log them.
+- Other machines' `live.json` are kept in memory only (last good copy). Written more than 15 minutes ago → stale: "no live data since HH:MM", left out of the estimate. No `live.json` and an app older than 0.1.2 → "needs version 0.1.2 or later".
 - Merge = add all machines' records together. They never overlap, because each machine exports only its own logs.
 - **Projects with the same name on both machines are merged**, with a per-machine breakdown. Settings → "Project aliases" maps different names to one project.
 - The local machine's data always comes from its own database. Only other machines' data comes from Drive (stored in a separate table, replaced on each read).

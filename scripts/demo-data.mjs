@@ -92,6 +92,9 @@ export function generateDemoData(output, options = {}) {
     sessionsPerDay = [1, 3],
     dayOffRate = 0.2,
     liveAt,
+    liveStartMinutes = 170,
+    liveEndMinutes = 0,
+    liveSessions = 2,
   } = options;
   const root = path.resolve(output);
 
@@ -311,22 +314,30 @@ export function generateDemoData(output, options = {}) {
 
   if (liveAt !== undefined) {
     if (!Number.isFinite(liveAt)) throw new Error('liveAt must be a time in milliseconds.');
+    if (!(liveStartMinutes > 0 && liveStartMinutes < 300)) {
+      throw new Error('liveStartMinutes must be between 0 and 300.');
+    }
+    if (!(liveEndMinutes >= 0 && liveEndMinutes < liveStartMinutes)) {
+      throw new Error('liveEndMinutes must be at least 0 and below liveStartMinutes.');
+    }
+    if (liveSessions !== 1 && liveSessions !== 2) throw new Error('liveSessions must be 1 or 2.');
     sessions += writeLiveSessions(liveAt);
   }
   return sessions;
 
   /**
    * Two sessions that end at `liveAt` or before it, never after: one still running (its last
-   * response a few seconds before `liveAt`) and a shorter one that stopped about an hour
-   * earlier. They give the Live page a running 5-hour window.
+   * response a few seconds before `liveAt`, or `liveEndMinutes` before it) and a shorter one
+   * that stopped about an hour earlier (left out with `liveSessions: 1`). They give the Live
+   * page a running 5-hour window.
    */
   function writeLiveSessions(at) {
     const plans = [
       {
         project: projects[0],
         model: 'claude-opus-5-5',
-        start: at - 170 * 60_000,
-        end: at - 12_000,
+        start: at - liveStartMinutes * 60_000,
+        end: liveEndMinutes > 0 ? at - liveEndMinutes * 60_000 : at - 12_000,
       },
       {
         project: projects[1] ?? projects[0],
@@ -334,7 +345,7 @@ export function generateDemoData(output, options = {}) {
         start: at - 125 * 60_000,
         end: at - 55 * 60_000,
       },
-    ];
+    ].slice(0, liveSessions);
     for (const plan of plans) {
       const { folder, cwd } = location(plan.project);
       const session = uuid();

@@ -275,8 +275,12 @@ export const fr: Strings = {
     kpi: {
       window: 'Tokens de la fenêtre',
       windowHint: (time: string, cost: string) => `depuis ${time} · ≈ ${cost}`,
+      windowHintAll: (time: string, computers: number, cost: string) =>
+        `depuis ${time} · ${computers} ordinateurs · ≈ ${cost}`,
       windowTitle:
         'Tous les tokens de cette fenêtre de 5 heures, sous-agents compris. Le coût est une estimation aux prix de l’API.',
+      windowTitleAll:
+        'Tous les ordinateurs ensemble, dans une seule fenêtre de 5 heures\u00a0: la limite de Claude est propre au compte. Cet ordinateur et les autres dont les données en direct sont récentes, sous-agents compris. Le coût est une estimation aux prix de l’API.',
       resets: 'Réinitialisation à',
       resetsIn: (countdown: string) => `dans ${countdown}`,
       resetsTomorrow: (countdown: string) => `demain, dans ${countdown}`,
@@ -297,11 +301,13 @@ export const fr: Strings = {
       usageHintClaude: (percent: string, time: string) =>
         `d’après les ${percent} de Claude à ${time} · estimation`,
       usageNone: 'aucune fenêtre terminée à comparer',
+      usageNoWindow: 'aucune fenêtre de 5 heures en cours',
       usageTitle:
-        'Une estimation. Le coût de la fenêtre aux prix de l’API, rapporté à la référence qui vaut 100\u202f%\u00a0: le % de Claude tant qu’il est à jour (plus votre utilisation depuis), sinon votre calibrage ou votre plus grande fenêtre terminée. La limite de Claude n’est pas publiée.',
+        'Une estimation pour votre compte, quel que soit l’ordinateur sélectionné. Le coût de la fenêtre aux prix de l’API, rapporté à la référence qui vaut 100\u202f%\u00a0: le % de Claude tant qu’il est à jour (plus l’utilisation depuis), sinon votre calibrage ou votre plus grande fenêtre terminée. Elle compte tous les ordinateurs dont les données en direct sont récentes. La limite de Claude n’est pas publiée.',
       limit: 'Limite atteinte vers',
       limitAt: (time: string) => `~${time}`,
       limitIn: (duration: string) => `dans ${duration} à cette vitesse`,
+      limitInAll: (duration: string) => `dans ${duration} à la vitesse de tous les ordinateurs`,
       limitAfterReset: 'Remise à zéro avant',
       limitAfterResetHint: 'à cette vitesse, avant la limite',
       limitReached: 'Atteinte',
@@ -320,7 +326,7 @@ export const fr: Strings = {
       claudeInUse: (percent: string, time: string, reset: string) =>
         `Le chiffre de Claude est utilisé\u00a0: ${percent} à ${time}, jusqu’à la réinitialisation de ${reset}.`,
       claudeWaiting: (percent: string, time: string, reset: string) =>
-        `Chiffre de Claude\u00a0: ${percent} à ${time} (réinitialisation à ${reset}). Utilisé dès qu’une fenêtre tourne sur cet ordinateur.`,
+        `Chiffre de Claude\u00a0: ${percent} à ${time} (réinitialisation à ${reset}). Utilisé dès qu’une fenêtre tourne.`,
       claudeStale: (percent: string, when: string) =>
         `Le dernier chiffre de Claude (${percent}, ${when}) date d’une fenêtre précédente.`,
       claudeOff: 'La lecture du % de Claude est désactivée dans les paramètres.',
@@ -328,11 +334,18 @@ export const fr: Strings = {
         'Le % de Claude n’est pas encore enregistré\u00a0: lancez /usage dans Claude Code.',
       largestLine: (day: string, cost: string) => `Plus grande fenêtre\u00a0: ${day} · ≈ ${cost}`,
       noLargest: 'Plus grande fenêtre\u00a0: aucune terminée pour l’instant',
+      largestThis: 'cet ordinateur',
       calibrationLine: (percent: string, when: string, cost: string) =>
         `Calibrage\u00a0: ${percent} le ${when} · limite ≈ ${cost}`,
       calibrationLost: (percent: string, when: string) =>
         `Calibrage\u00a0: ${percent} le ${when}, sa fenêtre n’est plus dans l’historique`,
       noCalibration: 'Calibrage\u00a0: aucun pour l’instant',
+      computers: (count: number) => `${count} ordinateurs`,
+      calibrationLocal: 'cet ordinateur seulement',
+      scopeAll: (names: string) =>
+        `Compte cet ordinateur et ${names}, dont les données en direct sont récentes (15 dernières minutes).`,
+      scopeLocal:
+        'Compte cet ordinateur seulement\u00a0: aucun autre ordinateur n’a partagé de données en direct depuis 15 minutes.',
       calibrateLabel: '% affiché par /usage',
       calibrate: 'Calibrer',
       calibrateHint:
@@ -348,8 +361,18 @@ export const fr: Strings = {
       body: 'La prochaine réponse démarre une nouvelle fenêtre de 5 heures.',
       last: (from: string, to: string, tokens: string, cost: string) =>
         `Dernière fenêtre\u00a0: ${from} à ${to} · ${tokens} tokens · ≈ ${cost}`,
+      bodyAll:
+        'Aucun ordinateur n’a de fenêtre en cours. La prochaine réponse sur l’un d’eux en démarre une nouvelle.',
       noLive: (name: string) => `Pas de données en direct pour ${name}`,
-      noLiveBody: 'Les données en direct des autres ordinateurs ne sont pas encore partagées.',
+      noLiveBody:
+        'Il partage ses données en direct dès que cette application y tourne avec la synchronisation activée.',
+      stale: (name: string, when: string) => `Pas de données en direct pour ${name} depuis ${when}`,
+      staleBody:
+        'Son application est fermée, ou Google Drive n’a pas synchronisé ses données en direct depuis.',
+      newerAppBody:
+        'Ses données en direct demandent une version plus récente de cette application\u00a0: mettez-la à jour sur cet ordinateur.',
+      needsUpdateBody: (version: string) =>
+        `Son application est trop ancienne pour partager des données en direct\u00a0: il faut la version ${version} ou plus récente.`,
     },
     chart: {
       title: 'Tokens par minute',
@@ -377,11 +400,14 @@ export const fr: Strings = {
       idle: 'aucune fenêtre active',
       noData: 'aucune utilisation',
       noLive: 'pas de données en direct',
+      stale: (when: string) => `pas de données en direct depuis ${when}`,
+      needsUpdate: (version: string) => `version ${version} ou plus récente requise`,
+      newerApp: 'mettez à jour cette application pour voir ses données',
     },
     watchingOff:
       'La surveillance des journaux est désactivée\u00a0: cette page ne change que si vous lancez une analyse.',
     watchingSettings: 'Ouvrir les paramètres',
-    note: 'Les estimations utilisent les prix de l’API. 100\u202f% correspond au % de Claude tant qu’il est à jour, sinon à votre calibrage ou à votre plus grande fenêtre terminée. La limite de Claude est propre au compte et n’est pas publiée\u00a0: l’utilisation sur d’autres ordinateurs ou sur claude.ai n’est pas dans ces journaux.',
+    note: 'Les estimations utilisent les prix de l’API et comptent tous les ordinateurs dont les données en direct sont récentes. 100\u202f% correspond au % de Claude tant qu’il est à jour, sinon à votre calibrage ou à votre plus grande fenêtre terminée. La limite de Claude est propre au compte et n’est pas publiée\u00a0: l’utilisation sur claude.ai, ou sur un ordinateur qui ne partage pas de données en direct, n’est pas comptée.',
   },
 
   calendar: {
@@ -821,7 +847,7 @@ export const fr: Strings = {
       explain:
         'Réunissez l’utilisation de vos ordinateurs grâce à Google Drive pour ordinateur. Chaque ordinateur écrit ses propres chiffres dans Mon Drive/ClaudeTokenTracker et lit ceux des autres. Aucun accès à votre compte Google, aucun serveur\u00a0: uniquement des fichiers dans votre dossier Drive local.',
       whatTitle: 'Ce qui est écrit sur Drive',
-      what: 'Uniquement des chiffres agrégés\u00a0: jours et heures, noms de projets (noms de dossiers, jamais de chemins), noms de modèles, types d’agents et nombres de tokens, ainsi que le nom de cet ordinateur.',
+      what: 'Uniquement des chiffres agrégés\u00a0: jours et heures, noms de projets (noms de dossiers, jamais de chemins), noms de modèles, types d’agents et nombres de tokens, ainsi que le nom de cet ordinateur. Pour la page En direct\u00a0: les heures de vos réponses des dernières heures, avec les mêmes noms et nombres.',
       never:
         'Jamais de prompts, de réponses, de code, de descriptions de sous-agents ni de chemins de fichiers.',
       status: 'État',

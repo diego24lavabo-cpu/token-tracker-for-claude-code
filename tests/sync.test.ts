@@ -21,6 +21,13 @@ import {
   getSessions,
 } from '../electron/aggregate';
 import { UsageDatabase } from '../electron/db';
+import { buildLiveFile } from '../electron/live';
+import {
+  LIVE_HEARTBEAT_MS,
+  LIVE_SCHEMA_VERSION,
+  LIVE_WRITE_INTERVAL_MS,
+  parseLiveFile,
+} from '../electron/liveFormat';
 import { scanLogs } from '../electron/scanner';
 import {
   EXPORT_DEBOUNCE_MS,
@@ -73,8 +80,13 @@ function database(name: string, platform: Platform): UsageDatabase {
   return db;
 }
 
-function syncFor(db: UsageDatabase, platform: Platform, now?: () => number) {
-  const events = { data: 0, status: 0 };
+function syncFor(
+  db: UsageDatabase,
+  platform: Platform,
+  now?: () => number,
+  { live = false, current = true }: { live?: boolean; current?: boolean } = {},
+) {
+  const events = { data: 0, status: 0, live: 0 };
   const service = new SyncService({
     database: () => db,
     appVersion: '0.1.0',
@@ -82,6 +94,9 @@ function syncFor(db: UsageDatabase, platform: Platform, now?: () => number) {
     serial: <T>(task: () => T | Promise<T>) => Promise.resolve().then(task),
     onDataChanged: () => events.data++,
     onStatusChanged: () => events.status++,
+    liveFile: live ? (database, at) => buildLiveFile(database, PRICING, at) : undefined,
+    liveCurrent: () => current,
+    onLiveChanged: () => events.live++,
     now,
   });
   services.push(service);
@@ -916,5 +931,186 @@ describe('deleted.json', () => {
     await macSync.service.readNow();
     expect(laptop.listMachines()).toHaveLength(3);
     expect(mac.listMachines()).toHaveLength(3);
+  });
+});
+
+describe('live.json', () => {
+  /** The fixtures' last responses are on Nov 10 around 14:00 UTC: an hour later. */
+  const LIVE_NOW = Date.parse('2026-11-10T15:00:00Z');
+
+  /** A Mac and a PC that both write their live.json, at a clock the test moves. */
+  async function twoLiveMachines() {
+    const clock = { now: LIVE_NOW };
+    const { folder } = fakeDrive();
+    const mac = database('MacBook', 'darwin');
+    const pc = database('Tower', 'win32');
+    await scanLogs(mac, [fixtureRoot('mac')]);
+    await scanLogs(pc, [fixtureRoot('win')]);
+    const macSync = syncFor(mac, 'darwin', () => clock.now, { live: true });
+    const pcSync = syncFor(pc, 'win32', () => clock.now, { live: true });
+    macSync.service.setFolder(folder, true);
+    pcSync.service.setFolder(folder, true);
+    await macSync.service.setEnabled(true, noDrive);
+    await pcSync.service.setEnabled(true, noDrive);
+    await macSync.service.readNow();
+    const liveOf = (db: UsageDatabase) => path.join(folder, 'machines', db.machineId, 'live.json');
+    return { clock, folder, mac, pc, macSync, pcSync, liveOf };
+  }
+
+  it('is written with the other files, and read by the other computer', async () => {
+    const { mac, pc, macSync, pcSync, liveOf } = await twoLiveMachines();
+    for (const db of [mac, pc]) {
+      const parsed = parseLiveFile(fs.readFileSync(liveOf(db), 'utf8'), db.machineId);
+      expect(parsed).toMatchObject({ ok: true, skippedRows: 0 });
+      expect(parsed.ok && parsed.value).toMatchObject({
+        schemaVersion: LIVE_SCHEMA_VERSION,
+        writtenAt: LIVE_NOW,
+      });
+    }
+    expect(macSync.service.liveFiles().map((file) => file.machineId)).toEqual([pc.machineId]);
+    expect(pcSync.service.liveFiles().map((file) => file.machineId)).toEqual([mac.machineId]);
+    expect(macSync.events.live).toBeGreaterThan(0);
+    // Nothing of the logs but numbers and folder names: no path, no session or agent id.
+    const text = fs.readFileSync(liveOf(mac), 'utf8').replace(mac.machineId, '');
+    expect(text).not.toMatch(/Users|alex|\\|\.jsonl|session|[0-9a-f]{8}-[0-9a-f]{4}-/);
+    expect(text).toContain('"demo-app"');
+  });
+
+  it('is written at most once a minute while in use, and every 5 minutes as a heartbeat', async () => {
+    const { clock, pc, pcSync, liveOf } = await twoLiveMachines();
+    const service = pcSync.service;
+    const delays: number[] = [];
+    const realSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = ((_handler: () => void, delay: number) => {
+      delays.push(delay);
+      return realSetTimeout(() => undefined, 0);
+    }) as typeof setTimeout;
+    try {
+      // syncNow wrote it at LIVE_NOW: a change 10 s later waits for the minute to pass.
+      clock.now += 10_000;
+      service.liveDataChanged();
+      service.liveDataChanged();
+      expect(delays).toEqual([LIVE_WRITE_INTERVAL_MS - 10_000]);
+      service.stop();
+
+      // Idle: the poll asks for a write once 5 minutes have passed, not before.
+      delays.length = 0;
+      clock.now = LIVE_NOW + LIVE_HEARTBEAT_MS - 1;
+      await service.readNow();
+      expect(delays).toEqual([]);
+      clock.now = LIVE_NOW + LIVE_HEARTBEAT_MS;
+      await service.readNow();
+      expect(delays).toEqual([0]);
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      service.stop();
+    }
+    expect(service.writeLive()).toBe(true);
+    const parsed = parseLiveFile(fs.readFileSync(liveOf(pc), 'utf8'), pc.machineId);
+    expect(parsed.ok && parsed.value.writtenAt).toBe(LIVE_NOW + LIVE_HEARTBEAT_MS);
+  });
+
+  it('keeps the last good copy, ignores conflict copies and forgets a file that is gone', async () => {
+    const { clock, pc, macSync, pcSync, liveOf } = await twoLiveMachines();
+    const file = liveOf(pc);
+    const good = fs.readFileSync(file, 'utf8');
+    const last = () => macSync.service.liveFiles().find((item) => item.machineId === pc.machineId);
+    const touch = (seconds: number) =>
+      fs.utimesSync(file, new Date(), new Date(LIVE_NOW + seconds * 1_000));
+    expect(last()?.writtenAt).toBe(LIVE_NOW);
+
+    // Drive still downloading: half a file. Then one of a newer app.
+    fs.writeFileSync(file, good.slice(0, Math.floor(good.length / 2)));
+    touch(1);
+    await macSync.service.readNow();
+    expect(last()?.writtenAt).toBe(LIVE_NOW);
+    expect(macSync.service.liveNewer()).toEqual([]);
+    fs.writeFileSync(file, good.replace('"schemaVersion":1', '"schemaVersion":99'));
+    touch(2);
+    await macSync.service.readNow();
+    expect(last()?.writtenAt).toBe(LIVE_NOW);
+    expect(macSync.service.liveNewer()).toEqual([pc.machineId]);
+    // Never a problem of the machine's numbers.
+    expect(macSync.service.machines().find((m) => m.id === pc.machineId)!.problem).toBeNull();
+
+    // A newer good one is read; a conflict copy is not.
+    clock.now += 2 * 60_000;
+    pcSync.service.writeLive();
+    fs.writeFileSync(path.join(path.dirname(file), 'live (1).json'), good);
+    await macSync.service.readNow();
+    expect(last()?.writtenAt).toBe(LIVE_NOW + 2 * 60_000);
+    expect(macSync.service.liveNewer()).toEqual([]);
+    expect(macSync.service.machines().find((m) => m.id === pc.machineId)!.conflictCopies).toBe(1);
+    expect(classifySyncFile('live.json')).toEqual({ kind: 'live' });
+    expect(classifySyncFile('live (1).json')).toEqual({ kind: 'conflict' });
+    expect(classifySyncFile('live.json.tmp')).toEqual({ kind: 'ignored' });
+
+    const before = macSync.events.live;
+    fs.rmSync(file);
+    await macSync.service.readNow();
+    expect(last()).toBeUndefined();
+    expect(macSync.events.live).toBe(before + 1);
+  });
+
+  it('is neither written nor read while sync is off, and never without a Drive folder', async () => {
+    const { mac, pc, macSync, liveOf } = await twoLiveMachines();
+    await macSync.service.setEnabled(false);
+    expect(macSync.service.liveFiles()).toEqual([]);
+    fs.rmSync(liveOf(mac));
+    expect(macSync.service.writeLive()).toBe(false);
+    expect(fs.existsSync(liveOf(mac))).toBe(false);
+
+    const missing = path.join(tempDir(), 'G-drive-not-mounted', 'My Drive', 'ClaudeTokenTracker');
+    const tower = syncFor(pc, 'win32', () => LIVE_NOW, { live: true });
+    tower.service.setFolder(missing, true);
+    pc.setSetting('sync_enabled', '1');
+    expect(tower.service.writeLive()).toBe(false);
+    expect(fs.existsSync(path.dirname(missing))).toBe(false);
+  });
+
+  it('forgets the live data of a machine deleted here, hidden, or whose folder is gone', async () => {
+    const deleted = await twoLiveMachines();
+    expect(deleted.macSync.service.liveFiles()).toHaveLength(1);
+    await deleted.macSync.service.deleteMachine(deleted.pc.machineId, false);
+    expect(deleted.macSync.service.liveFiles()).toEqual([]);
+
+    const gone = await twoLiveMachines();
+    const before = gone.macSync.events.live;
+    fs.rmSync(path.join(gone.folder, 'machines', gone.pc.machineId), { recursive: true });
+    await gone.macSync.service.readNow();
+    expect(gone.macSync.service.liveFiles()).toEqual([]);
+    expect(gone.macSync.events.live).toBe(before + 1);
+
+    const hidden = await twoLiveMachines();
+    await hidden.macSync.service.hideMachine(hidden.pc.machineId);
+    await hidden.macSync.service.readNow();
+    expect(hidden.macSync.service.liveFiles()).toEqual([]);
+  });
+
+  it('stops the heartbeat while the logs are not watched, so the file goes stale', async () => {
+    const clock = { now: LIVE_NOW };
+    const { folder } = fakeDrive();
+    const pc = database('Tower', 'win32');
+    await scanLogs(pc, [fixtureRoot('win')]);
+    const { service } = syncFor(pc, 'win32', () => clock.now, { live: true, current: false });
+    service.setFolder(folder, true);
+    await service.setEnabled(true, noDrive);
+    const delays: number[] = [];
+    const realSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = ((_handler: () => void, delay: number) => {
+      delays.push(delay);
+      return realSetTimeout(() => undefined, 0);
+    }) as typeof setTimeout;
+    try {
+      clock.now += 2 * LIVE_HEARTBEAT_MS;
+      await service.readNow();
+      expect(delays).toEqual([]);
+      // A scan still writes it: its numbers are then current.
+      service.liveDataChanged();
+      expect(delays).toEqual([0]);
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      service.stop();
+    }
   });
 });

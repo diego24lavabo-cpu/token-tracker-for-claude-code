@@ -33,4 +33,5 @@ export const IPC = {
   keepHistoryLonger: 'settings:keep-history-longer',
   usageUpdated: 'usage:updated',
   syncUpdated: 'sync:updated',
+  liveUpdated: 'live:updated',
 } as const;

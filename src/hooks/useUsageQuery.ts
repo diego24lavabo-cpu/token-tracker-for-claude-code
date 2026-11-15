@@ -21,11 +21,15 @@ export interface UsageQuery<T> {
  */
 export function useUsageQuery<T>(
   fetcher: () => Promise<T>,
-  /** Also loads again when the sync status changes, for a page that shows it. */
-  options: { syncStatus?: boolean } = {},
+  /**
+   * `syncStatus`: also loads again when the sync status changes, for a page that shows it.
+   * `live`: also when another computer's live data changed (the Live page).
+   */
+  options: { syncStatus?: boolean; live?: boolean } = {},
 ): UsageQuery<T> {
   const [state, setState] = useState<QueryState<T>>({ source: null, data: null, failed: false });
   const syncStatus = options.syncStatus === true;
+  const live = options.live === true;
 
   useEffect(() => {
     let cancelled = false;
@@ -45,12 +49,14 @@ export function useUsageQuery<T>(
     load();
     const unsubscribe = window.api.onUsageUpdated(load);
     const unsubscribeSync = syncStatus ? window.api.onSyncUpdated(load) : () => undefined;
+    const unsubscribeLive = live ? window.api.onLiveUpdated(load) : () => undefined;
     return () => {
       cancelled = true;
       unsubscribe();
       unsubscribeSync();
+      unsubscribeLive();
     };
-  }, [fetcher, syncStatus]);
+  }, [fetcher, syncStatus, live]);
 
   return { data: state.data, loading: state.source !== fetcher, failed: state.failed };
 }

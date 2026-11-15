@@ -80,11 +80,14 @@ Only the usage numbers of each response are read (token counts, model, timestamp
 
 Sync is **off by default**. When you turn it on in Settings, the app writes small JSON files into a `ClaudeTokenTracker` folder inside your local **Google Drive for desktop** folder ("My Drive", in any language), and reads the files written by your other machines. There is no Google API, no OAuth and no server: the Drive client on your computer does the transfer. With several Google accounts, or none found, you choose the folder.
 
-Each machine writes only its own folder, `ClaudeTokenTracker/machines/<random id>/`: `machine.json` (name, platform, last sync) and one file per year (`2026.json`, a few MB at most). What is written:
+Each machine writes only its own folder, `ClaudeTokenTracker/machines/<random id>/`: `machine.json` (name, platform, last sync), one file per year (`2026.json`, a few MB at most) and `live.json` for the Live page. What is written:
 
 - aggregated token counts per day and hour, project name (folder name only), model, agent type and kind
 - one summary per session and per subagent run: random ids, start and end times, active time, token counts per model, the projects it worked in and the days it was active
+- in `live.json`, the last 6 hours minute by minute (response times, project, model, token counts), when the machine was in use over the last 24 hours, and its current and previous 5-hour windows
 - your machine's name and platform
+
+`live.json` is rewritten at most once a minute while you use Claude Code, and every 5 minutes while the app runs, so the other computers can tell an idle machine from one whose app is closed. Claude's 5-hour limit is per account, so the Live page adds up every computer whose live data is less than 15 minutes old; older live data is left out of the estimate and the page says so. A computer needs version 0.1.2 or later to share live data.
 
 What is **never** written: prompts, responses, code, file paths, subagent task descriptions.
 

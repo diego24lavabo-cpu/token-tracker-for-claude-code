@@ -271,8 +271,12 @@ export const en = {
     kpi: {
       window: 'Window tokens',
       windowHint: (time: string, cost: string) => `since ${time} · ≈ ${cost}`,
+      windowHintAll: (time: string, computers: number, cost: string) =>
+        `since ${time} · ${computers} computers · ≈ ${cost}`,
       windowTitle:
         'All tokens of this 5-hour window, subagents included. The cost is an estimate at API prices.',
+      windowTitleAll:
+        'Every computer together, in one 5-hour window: Claude’s limit is per account. This computer and the others whose live data is fresh, subagents included. The cost is an estimate at API prices.',
       resets: 'Resets at',
       resetsIn: (countdown: string) => `in ${countdown}`,
       resetsTomorrow: (countdown: string) => `tomorrow, in ${countdown}`,
@@ -292,11 +296,13 @@ export const en = {
       usageHintClaude: (percent: string, time: string) =>
         `from Claude’s ${percent} at ${time} · estimate`,
       usageNone: 'no finished window to compare with',
+      usageNoWindow: 'no 5-hour window running',
       usageTitle:
-        'An estimate. The window’s cost at API prices against the reference that counts as 100%: Claude’s own % while it is current (plus your usage since), else your calibration or your largest finished window. Claude’s own limit is not published.',
+        'An estimate for your account, whichever computer is selected. The window’s cost at API prices against the reference that counts as 100%: Claude’s own % while it is current (plus the usage since), else your calibration or your largest finished window. It counts every computer whose live data is fresh. Claude’s own limit is not published.',
       limit: 'Limit reached at',
       limitAt: (time: string) => `~${time}`,
       limitIn: (duration: string) => `in ${duration} at this speed`,
+      limitInAll: (duration: string) => `in ${duration} at all computers’ speed`,
       limitAfterReset: 'Resets first',
       limitAfterResetHint: 'at this speed, before the limit',
       limitReached: 'Reached',
@@ -315,18 +321,25 @@ export const en = {
       claudeInUse: (percent: string, time: string, reset: string) =>
         `Claude’s own number is in use: ${percent} at ${time}, until the reset at ${reset}.`,
       claudeWaiting: (percent: string, time: string, reset: string) =>
-        `Claude’s own number: ${percent} at ${time} (reset at ${reset}). Used once a window runs on this computer.`,
+        `Claude’s own number: ${percent} at ${time} (reset at ${reset}). Used once a window runs.`,
       claudeStale: (percent: string, when: string) =>
         `Claude’s last number (${percent}, ${when}) is from an earlier window.`,
       claudeOff: 'Reading Claude’s own % is turned off in Settings.',
       claudeNone: 'Claude’s own % is not saved yet: run /usage in Claude Code.',
       largestLine: (day: string, cost: string) => `Largest window: ${day} · ≈ ${cost}`,
       noLargest: 'Largest window: none finished yet',
+      largestThis: 'this computer',
       calibrationLine: (percent: string, when: string, cost: string) =>
         `Calibration: ${percent} on ${when} · limit ≈ ${cost}`,
       calibrationLost: (percent: string, when: string) =>
         `Calibration: ${percent} on ${when}, its window is no longer in the history`,
       noCalibration: 'Calibration: none yet',
+      computers: (count: number) => `${count} computers`,
+      calibrationLocal: 'this computer only',
+      scopeAll: (names: string) =>
+        `Counts this computer and ${names}, whose live data is fresh (last 15 minutes).`,
+      scopeLocal:
+        'Counts this computer only: no other computer has shared live data in the last 15 minutes.',
       calibrateLabel: '% shown by /usage',
       calibrate: 'Calibrate',
       calibrateHint:
@@ -342,8 +355,15 @@ export const en = {
       body: 'The next response starts a new 5-hour window.',
       last: (from: string, to: string, tokens: string, cost: string) =>
         `Last window: ${from} to ${to} · ${tokens} tokens · ≈ ${cost}`,
+      bodyAll:
+        'No computer has a running window. The next response on any of them starts a new one.',
       noLive: (name: string) => `No live data from ${name}`,
-      noLiveBody: 'Live data from other computers is not shared yet.',
+      noLiveBody: 'It shares its live data once it runs this app with sync turned on.',
+      stale: (name: string, when: string) => `No live data from ${name} since ${when}`,
+      staleBody: 'Its app is closed, or Google Drive has not synced its live data since.',
+      newerAppBody: 'Its live data needs a newer version of this app: update it on this computer.',
+      needsUpdateBody: (version: string) =>
+        `Its app is too old to share live data: it needs version ${version} or later.`,
     },
     chart: {
       title: 'Tokens per minute',
@@ -371,10 +391,13 @@ export const en = {
       idle: 'no active window',
       noData: 'no usage',
       noLive: 'no live data',
+      stale: (when: string) => `no live data since ${when}`,
+      needsUpdate: (version: string) => `needs version ${version} or later`,
+      newerApp: 'update this app to see its live data',
     },
     watchingOff: 'File watching is off: this page only changes when you scan again.',
     watchingSettings: 'Open Settings',
-    note: 'Estimates use API prices. 100% is Claude’s own % while it is current, else your calibration or your largest finished window. Claude’s limit is per account and is not published: usage on other computers or on claude.ai is not in these logs.',
+    note: 'Estimates use API prices and count every computer whose live data is fresh. 100% is Claude’s own % while it is current, else your calibration or your largest finished window. Claude’s limit is per account and is not published: usage on claude.ai, or on a computer that does not share live data, is not counted.',
   },
 
   calendar: {
@@ -814,7 +837,7 @@ export const en = {
       explain:
         'Combine the usage of your computers through Google Drive for desktop. Each computer writes its own numbers to My Drive/ClaudeTokenTracker and reads the others’. No Google account access, no server: only files in your local Drive folder.',
       whatTitle: 'What is written to Drive',
-      what: 'Aggregated numbers only: days and hours, project names (folder names, never paths), model names, agent types and token counts, plus this computer’s name.',
+      what: 'Aggregated numbers only: days and hours, project names (folder names, never paths), model names, agent types and token counts, plus this computer’s name. For the Live page: the times of your responses over the last hours, with the same names and counts.',
       never: 'Never prompts, responses, code, subagent descriptions or file paths.',
       status: 'Status',
       statusOff: 'Off: this computer only',

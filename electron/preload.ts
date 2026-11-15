@@ -56,6 +56,13 @@ const api: Api = {
       ipcRenderer.removeListener(IPC.syncUpdated, listener);
     };
   },
+  onLiveUpdated: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on(IPC.liveUpdated, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC.liveUpdated, listener);
+    };
+  },
 };
 
 contextBridge.exposeInMainWorld('api', api);
