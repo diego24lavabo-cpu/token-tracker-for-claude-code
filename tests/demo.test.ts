@@ -8,11 +8,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRandom, DEMO_MARKER, generateDemoData } from '../scripts/demo-data.mjs';
 import { getMachinesDetail, getOverview } from '../electron/aggregate';
 import { UsageDatabase } from '../electron/db';
+import { getLive } from '../electron/live';
 import { createDemoEnvironment, generateDemoWorld, removeDemoEnvironment } from '../electron/demo';
 import { DEFAULT_PRICING } from '../electron/pricing';
 import { scanLogs } from '../electron/scanner';
 import { SyncService } from '../electron/sync';
-import { cleanupTempDirs, tempDir, tokenTotal } from './helpers';
+import { cleanupTempDirs, openMemoryDb, tempDir, tokenTotal } from './helpers';
 
 /**
  * Generating writes many small files, which is slow on Windows runners (a year of data took
@@ -104,6 +105,50 @@ describe('generateDemoData', () => {
       new Set(jsonlLines(root).map((line) => (line.message as { id: string }).id));
     const first = ids(a);
     expect([...ids(b)].some((id) => first.has(id))).toBe(false);
+  });
+
+  describe('with liveAt', () => {
+    // After every response of the last day of the history, so the two live sessions are
+    // the only recent ones.
+    const LIVE_AT = Date.parse('2026-11-10T23:00:00Z');
+
+    it('adds a running session and one that stopped, none ending after liveAt', () => {
+      const plain = path.join(tempDir(), 'projects');
+      const live = path.join(tempDir(), 'projects');
+      generateDemoData(plain, SMALL);
+      expect(generateDemoData(live, { ...SMALL, liveAt: LIVE_AT })).toBe(SESSIONS_IN_SMALL + 2);
+
+      // The history is unchanged: the live sessions are the files that are new.
+      const before = snapshot(plain);
+      const added = [...snapshot(live)].filter(([file]) => !before.has(file));
+      for (const [file, text] of snapshot(plain)) expect(snapshot(live).get(file)).toBe(text);
+      const times = added
+        .filter(([file]) => file.endsWith('.jsonl'))
+        .flatMap(([, text]) => text.split(/\r?\n/).filter(Boolean))
+        .map((line) => Date.parse((JSON.parse(line) as { timestamp: string }).timestamp));
+      expect(times.length).toBeGreaterThan(20);
+      expect(Math.max(...times)).toBeLessThanOrEqual(LIVE_AT);
+      expect(Math.max(...times)).toBeGreaterThan(LIVE_AT - 3 * 60_000);
+      expect(Math.min(...times)).toBeGreaterThanOrEqual(LIVE_AT - 170 * 60_000);
+    });
+
+    it('gives the Live page a running window with an active project', async () => {
+      const root = path.join(tempDir(), 'projects');
+      generateDemoData(root, { ...SMALL, liveAt: LIVE_AT });
+      const db = openMemoryDb();
+      open.push(db);
+      await scanLogs(db, [root]);
+
+      const live = getLive(db, DEFAULT_PRICING, undefined, 3, LIVE_AT);
+      const machine = live.machines[0]!;
+      expect(machine.status).toBe('active');
+      expect(machine.window!.end).toBeGreaterThan(LIVE_AT);
+      expect(machine.window!.total).toBeGreaterThan(0);
+      expect(machine.burn.tokensPerMinute).toBeGreaterThan(0);
+      expect(machine.estimate).not.toBeNull();
+      expect(live.active.map((project) => project.project)).toContain('demo-app');
+      expect(live.series.length).toBeGreaterThan(0);
+    });
   });
 
   it('writes fake Windows or macOS paths only', () => {

@@ -17,6 +17,7 @@ export const fr: Strings = {
   nav: {
     label: 'Sections',
     overview: 'Vue d’ensemble',
+    live: 'En direct',
     projects: 'Projets',
     models: 'Modèles',
     calendar: 'Calendrier',
@@ -38,6 +39,10 @@ export const fr: Strings = {
     models: {
       title: 'Modèles',
       subtitle: 'Utilisation, cache et coût par modèle',
+    },
+    live: {
+      title: 'En direct',
+      subtitle: 'En ce moment\u00a0: votre fenêtre de 5 heures et ce qui tourne',
     },
     calendar: {
       title: 'Calendrier',
@@ -263,6 +268,79 @@ export const fr: Strings = {
         cacheWrite: 'Écriture cache',
       },
     },
+  },
+
+  live: {
+    periodIgnored: 'La page En direct montre toujours la fenêtre de 5 heures en cours',
+    kpi: {
+      window: 'Tokens de la fenêtre',
+      windowHint: (time: string, cost: string) => `depuis ${time} · ≈ ${cost}`,
+      windowTitle:
+        'Tous les tokens de cette fenêtre de 5 heures, sous-agents compris. Le coût est une estimation aux prix de l’API.',
+      resets: 'Réinitialisation à',
+      resetsIn: (countdown: string) => `dans ${countdown}`,
+      resetsTomorrow: (countdown: string) => `demain, dans ${countdown}`,
+      resetsTitle:
+        'Reconstituée à partir des heures de vos réponses\u00a0: la fenêtre commence à la première réponse après la fin de la précédente et dure 5 heures.',
+      speed: 'Vitesse',
+      speedValue: (tokens: string) => `${tokens}/min`,
+      speedHint: (cost: string, minutes: number) => `≈ ${cost}/h · sur ${minutes}\u202fmin`,
+      speedIdle: (minutes: number) => `rien depuis ${minutes}\u202fmin`,
+      speedTitle:
+        'Tokens par minute sur les 15 dernières minutes. Le coût par heure est une estimation.',
+      usage: 'Utilisation estimée',
+      usageHint: (day: string) => `de votre plus grande fenêtre (${day}) · estimation`,
+      usageNone: 'aucune fenêtre terminée à comparer',
+      usageTitle:
+        'Une estimation, pas le chiffre affiché par Claude. Le coût de la fenêtre aux prix de l’API, en part de votre plus grande fenêtre terminée, qui vaut 100\u202f%. La limite de Claude n’est pas publiée.',
+      limit: 'Limite estimée',
+      limitIn: (duration: string) => `dans ${duration} à cette vitesse`,
+      limitAfterReset: 'Après la fin',
+      limitAfterResetHint: 'à cette vitesse, la fenêtre se termine avant la limite',
+      limitReached: 'Atteinte',
+      limitReachedHint: 'au niveau de votre plus grande fenêtre, ou au-dessus',
+      limitTitle:
+        'Une estimation, pas la vraie limite de Claude\u00a0: le moment où la fenêtre atteindrait votre plus grande fenêtre terminée, à la vitesse des 15 dernières minutes.',
+    },
+    idle: {
+      title: 'Aucune fenêtre active',
+      body: 'La prochaine réponse démarre une nouvelle fenêtre de 5 heures.',
+      last: (from: string, to: string, tokens: string, cost: string) =>
+        `Dernière fenêtre\u00a0: ${from} à ${to} · ${tokens} tokens · ≈ ${cost}`,
+      noLive: (name: string) => `Pas de données en direct pour ${name}`,
+      noLiveBody: 'Les données en direct des autres ordinateurs ne sont pas encore partagées.',
+    },
+    chart: {
+      title: 'Tokens par minute',
+      hint: 'par projet',
+      label: (hours: number) => `Tokens par minute sur les ${hours} dernières heures, par projet`,
+      range: 'Période du graphique',
+      ranges: { '1': '1\u202fh', '3': '3\u202fh', '6': '6\u202fh' },
+      windowStart: 'Début de fenêtre',
+      now: 'Maintenant',
+      others: (count: number) => `${count} autres projets`,
+      empty: 'Aucune utilisation sur cette période',
+      total: 'Total',
+    },
+    active: {
+      title: 'En cours',
+      hint: 'tokens des 15 dernières minutes',
+      empty: 'Aucune réponse depuis 5 minutes',
+      label: 'Projets en cours d’utilisation',
+      lastResponse: (ago: string) => `dernière réponse ${ago}`,
+    },
+    machines: {
+      title: 'Fenêtres par machine',
+      thisMachine: 'Cet ordinateur',
+      active: (time: string) => `fin à ${time}`,
+      idle: 'aucune fenêtre active',
+      noData: 'aucune utilisation',
+      noLive: 'pas de données en direct',
+    },
+    watchingOff:
+      'La surveillance des journaux est désactivée\u00a0: cette page ne change que si vous lancez une analyse.',
+    watchingSettings: 'Ouvrir les paramètres',
+    note: 'Les estimations utilisent les prix de l’API et votre plus grande fenêtre terminée comme 100\u202f%. La limite de Claude est propre au compte et n’est pas publiée\u00a0: l’utilisation sur d’autres ordinateurs ou sur claude.ai n’est pas dans ces journaux.',
   },
 
   calendar: {

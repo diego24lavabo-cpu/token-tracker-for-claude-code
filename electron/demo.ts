@@ -105,6 +105,11 @@ export interface DemoWorldSize {
   localDays?: number;
   /** Days of logs on the second computer (default four months). */
   otherDays?: number;
+  /**
+   * The current time, epoch milliseconds. When set, this machine also has a session running
+   * at that time, so the Live page shows a running window (default: none).
+   */
+  liveAt?: number;
 }
 
 /**
@@ -115,10 +120,10 @@ export async function generateDemoWorld(
   env: DemoEnvironment,
   platform: Platform,
   appVersion: string,
-  { localDays = 365, otherDays = 120 }: DemoWorldSize = {},
+  { localDays = 365, otherDays = 120, liveAt }: DemoWorldSize = {},
 ): Promise<void> {
   const { local, other } = machinesFor(platform);
-  generateDemoData(env.logRoot, { days: localDays, seed: 42, paths: local.paths });
+  generateDemoData(env.logRoot, { days: localDays, seed: 42, paths: local.paths, liveAt });
 
   const otherRoot = path.join(env.root, 'logs', 'other-machine', 'projects');
   generateDemoData(otherRoot, {

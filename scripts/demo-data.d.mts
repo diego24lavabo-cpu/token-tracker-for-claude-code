@@ -15,6 +15,12 @@ export interface DemoDataOptions {
   sessionsPerDay?: readonly [number, number];
   /** Share of days without any session (default 0.2). */
   dayOffRate?: number;
+  /**
+   * The current time, epoch milliseconds. When set, two more sessions are written that end
+   * at this time or before it: one still running and one that stopped about an hour
+   * earlier, so the Live page has a running window (default: none).
+   */
+  liveAt?: number;
 }
 
 /** Seeded random numbers in [0, 1) (mulberry32). */

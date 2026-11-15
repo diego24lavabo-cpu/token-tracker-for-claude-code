@@ -829,6 +829,7 @@ function registerIpc(): void {
     demo: isDemo,
     logRoots: currentLogRoots().map((root) => tildify(root)),
     defaultLogRoot: tildify(defaultLogRoot()),
+    fileWatching: database ? getFileWatching(database) : false,
   }));
 
   handle<LanguageInfo>(IPC.getLanguage, () => languageInfo ?? applyLanguage('system'));
@@ -981,7 +982,7 @@ if (!app.requestSingleInstanceLock()) {
 async function startDemo(env: DemoEnvironment): Promise<void> {
   try {
     const started = performance.now();
-    await generateDemoWorld(env, currentPlatform(), app.getVersion());
+    await generateDemoWorld(env, currentPlatform(), app.getVersion(), { liveAt: Date.now() });
     console.log(`[demo] Sample data generated in ${Math.round(performance.now() - started)} ms`);
   } catch (error) {
     console.error('[demo] Could not generate the sample data:', error);

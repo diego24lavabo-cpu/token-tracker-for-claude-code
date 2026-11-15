@@ -4,6 +4,7 @@ import { Sidebar } from './components/Sidebar';
 import { TitleBar } from './components/TitleBar';
 import { Agents } from './pages/Agents';
 import { Calendar } from './pages/Calendar';
+import { Live } from './pages/Live';
 import { Machines } from './pages/Machines';
 import { Models } from './pages/Models';
 import { Overview } from './pages/Overview';
@@ -40,6 +41,7 @@ function Shell() {
         <main className="main">
           <Routes>
             <Route path="/" element={<Overview />} />
+            <Route path="/live" element={<Live />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/models" element={<Models />} />
             <Route path="/calendar" element={<Calendar />} />
@@ -55,7 +57,7 @@ function Shell() {
   );
 }
 
-/** Cmd+1…8 on macOS and Ctrl+1…8 elsewhere jump to the sections in sidebar order. */
+/** Cmd+1…9 on macOS and Ctrl+1…9 elsewhere jump to the sections in sidebar order. */
 function useSectionShortcuts() {
   const navigate = useNavigate();
 

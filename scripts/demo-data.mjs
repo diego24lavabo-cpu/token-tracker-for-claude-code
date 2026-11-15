@@ -91,6 +91,7 @@ export function generateDemoData(output, options = {}) {
     projects = DEMO_PROJECTS,
     sessionsPerDay = [1, 3],
     dayOffRate = 0.2,
+    liveAt,
   } = options;
   const root = path.resolve(output);
 
@@ -307,5 +308,74 @@ export function generateDemoData(output, options = {}) {
       write(path.join(root, folder, `${session}.jsonl`), main);
     }
   }
+
+  if (liveAt !== undefined) {
+    if (!Number.isFinite(liveAt)) throw new Error('liveAt must be a time in milliseconds.');
+    sessions += writeLiveSessions(liveAt);
+  }
   return sessions;
+
+  /**
+   * Two sessions that end at `liveAt` or before it, never after: one still running (its last
+   * response a few seconds before `liveAt`) and a shorter one that stopped about an hour
+   * earlier. They give the Live page a running 5-hour window.
+   */
+  function writeLiveSessions(at) {
+    const plans = [
+      {
+        project: projects[0],
+        model: 'claude-opus-5-5',
+        start: at - 170 * 60_000,
+        end: at - 12_000,
+      },
+      {
+        project: projects[1] ?? projects[0],
+        model: 'claude-sonnet-5-5',
+        start: at - 125 * 60_000,
+        end: at - 55 * 60_000,
+      },
+    ];
+    for (const plan of plans) {
+      const { folder, cwd } = location(plan.project);
+      const session = uuid();
+      const subagentDir = path.join(root, folder, session, 'subagents');
+      const main = [];
+      let context = int(15000, 30000);
+      let ts = plan.start;
+      while (ts <= plan.end) {
+        main.push(
+          assistant({
+            ts,
+            session,
+            cwd,
+            model: plan.model,
+            u: [int(5, 80), int(50, 1500), int(300, 5000), context],
+          }),
+        );
+        context += int(500, 6000);
+        ts += int(10, 150) * 1000;
+        // A pause now and then, but never in the last 20 minutes: the session is running.
+        if (rand() < 0.04 && ts < plan.end - 20 * 60_000) ts += int(3, 9) * 60_000;
+        // A short subagent run that must end before the session does.
+        if (rand() < 0.05 && ts + 6 * 60_000 < plan.end) {
+          const agentId = hex(16);
+          const [type, agentModel, startup] = pick(TASK_TYPES);
+          const run = runLines({
+            session,
+            cwd,
+            model: agentModel,
+            start: ts,
+            calls: int(3, 8),
+            startup,
+            agentId,
+          });
+          write(path.join(subagentDir, `agent-${agentId}.jsonl`), run.lines);
+          writeMeta(subagentDir, agentId, type, 'Synthetic task.');
+          ts = run.end;
+        }
+      }
+      write(path.join(root, folder, `${session}.jsonl`), main);
+    }
+    return plans.length;
+  }
 }

@@ -53,6 +53,8 @@ export interface AppInfo {
   logRoots: string[];
   /** The folder shown when no log folder exists yet, shortened with `~`. */
   defaultLogRoot: string;
+  /** Whether the app watches the log folders; off, the Live page only changes on a scan. */
+  fileWatching: boolean;
 }
 
 // ── Pricing ───────────────────────────────────────────────────────────────────

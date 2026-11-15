@@ -1,5 +1,13 @@
 export type SectionId =
-  'overview' | 'projects' | 'models' | 'calendar' | 'sessions' | 'agents' | 'machines' | 'settings';
+  | 'overview'
+  | 'live'
+  | 'projects'
+  | 'models'
+  | 'calendar'
+  | 'sessions'
+  | 'agents'
+  | 'machines'
+  | 'settings';
 
 export interface Section {
   id: SectionId;
@@ -9,6 +17,7 @@ export interface Section {
 /** The sidebar sections, in display order. Settings sits apart at the bottom of the list. */
 export const SECTIONS: readonly Section[] = [
   { id: 'overview', path: '/' },
+  { id: 'live', path: '/live' },
   { id: 'projects', path: '/projects' },
   { id: 'models', path: '/models' },
   { id: 'calendar', path: '/calendar' },

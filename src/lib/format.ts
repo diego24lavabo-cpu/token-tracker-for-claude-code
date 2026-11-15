@@ -288,3 +288,20 @@ export function formatTimeAgo(iso: string, now: number = Date.now()): string {
   if (hours < 24) return strings.dates.hoursAgo(hours);
   return strings.dates.onDay(formatDay(localDayOf(new Date(at))));
 }
+
+/** A countdown, to the second: `2:14:05`, `14:05`, `0:09`. Negative values count as zero. */
+export function formatCountdown(milliseconds: number): string {
+  if (!Number.isFinite(milliseconds)) return PLACEHOLDER;
+  const total = Math.max(0, Math.floor(milliseconds / 1_000));
+  const hours = Math.floor(total / 3_600);
+  const minutes = Math.floor((total % 3_600) / 60);
+  const seconds = total % 60;
+  return hours > 0 ? `${hours}:${pad2(minutes)}:${pad2(seconds)}` : `${minutes}:${pad2(seconds)}`;
+}
+
+/** The time of day of an instant in this computer's time zone, 24 hours: `04:42`. */
+export function formatClock(epochMs: number): string {
+  if (!Number.isFinite(epochMs)) return PLACEHOLDER;
+  const date = new Date(epochMs);
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}

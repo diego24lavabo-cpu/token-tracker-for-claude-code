@@ -12,6 +12,7 @@ export const en = {
   nav: {
     label: 'Sections',
     overview: 'Overview',
+    live: 'Live',
     projects: 'Projects',
     models: 'Models',
     calendar: 'Calendar',
@@ -25,6 +26,10 @@ export const en = {
     overview: {
       title: 'Overview',
       subtitle: 'The essentials of your usage · open a section for the details',
+    },
+    live: {
+      title: 'Live',
+      subtitle: 'Right now: your 5-hour window and what is running',
     },
     projects: {
       title: 'Projects',
@@ -259,6 +264,77 @@ export const en = {
         cacheWrite: 'Cache write',
       },
     },
+  },
+
+  live: {
+    periodIgnored: 'The Live page always shows the current 5-hour window',
+    kpi: {
+      window: 'Window tokens',
+      windowHint: (time: string, cost: string) => `since ${time} · ≈ ${cost}`,
+      windowTitle:
+        'All tokens of this 5-hour window, subagents included. The cost is an estimate at API prices.',
+      resets: 'Resets at',
+      resetsIn: (countdown: string) => `in ${countdown}`,
+      resetsTomorrow: (countdown: string) => `tomorrow, in ${countdown}`,
+      resetsTitle:
+        'Rebuilt from the times of your responses: the window starts with the first response after the previous one ended and lasts 5 hours.',
+      speed: 'Speed',
+      speedValue: (tokens: string) => `${tokens}/min`,
+      speedHint: (cost: string, minutes: number) => `≈ ${cost}/h · last ${minutes} min`,
+      speedIdle: (minutes: number) => `nothing in the last ${minutes} min`,
+      speedTitle: 'Tokens per minute over the last 15 minutes. The cost per hour is an estimate.',
+      usage: 'Estimated usage',
+      usageHint: (day: string) => `of your largest window (${day}) · estimate`,
+      usageNone: 'no finished window to compare with',
+      usageTitle:
+        'An estimate, not the number Claude shows. The window’s cost at API prices, as a share of your largest finished window, which counts as 100%. Claude’s own limit is not published.',
+      limit: 'Estimated limit',
+      limitIn: (duration: string) => `in ${duration} at this speed`,
+      limitAfterReset: 'After reset',
+      limitAfterResetHint: 'at this speed the window resets first',
+      limitReached: 'Reached',
+      limitReachedHint: 'at or above your largest window',
+      limitTitle:
+        'An estimate, not Claude’s real limit: when the window would reach your largest finished window at the speed of the last 15 minutes.',
+    },
+    idle: {
+      title: 'No active window',
+      body: 'The next response starts a new 5-hour window.',
+      last: (from: string, to: string, tokens: string, cost: string) =>
+        `Last window: ${from} to ${to} · ${tokens} tokens · ≈ ${cost}`,
+      noLive: (name: string) => `No live data from ${name}`,
+      noLiveBody: 'Live data from other computers is not shared yet.',
+    },
+    chart: {
+      title: 'Tokens per minute',
+      hint: 'by project',
+      label: (hours: number) => `Tokens per minute over the last ${hours} hours, by project`,
+      range: 'Chart range',
+      ranges: { '1': '1 h', '3': '3 h', '6': '6 h' },
+      windowStart: 'Window start',
+      now: 'Now',
+      others: (count: number) => `${count} other projects`,
+      empty: 'No usage in this range',
+      total: 'Total',
+    },
+    active: {
+      title: 'Active now',
+      hint: 'tokens in the last 15 min',
+      empty: 'No response in the last 5 minutes',
+      label: 'Projects in use',
+      lastResponse: (ago: string) => `last response ${ago}`,
+    },
+    machines: {
+      title: 'Windows by machine',
+      thisMachine: 'This computer',
+      active: (time: string) => `resets at ${time}`,
+      idle: 'no active window',
+      noData: 'no usage',
+      noLive: 'no live data',
+    },
+    watchingOff: 'File watching is off: this page only changes when you scan again.',
+    watchingSettings: 'Open Settings',
+    note: 'Estimates use API prices and your largest finished window as 100%. Claude’s own limit is per account and is not published: usage on other computers or on claude.ai is not in these logs.',
   },
 
   calendar: {

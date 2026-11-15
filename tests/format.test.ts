@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { setLanguage } from '../src/i18n';
 import {
   formatBytes,
+  formatClock,
+  formatCountdown,
   formatCost,
   formatDecimal,
   formatPriceInput,
@@ -210,6 +212,29 @@ describe('formatDateTime', () => {
 
   it('shows a dash for a value that is not a date', () => {
     expect(formatDateTime('soon')).toBe('—');
+  });
+});
+
+describe('formatCountdown', () => {
+  it('counts down to the second, with hours only when there are some', () => {
+    expect(formatCountdown(2 * 3_600_000 + 14 * 60_000 + 5_000)).toBe('2:14:05');
+    expect(formatCountdown(14 * 60_000 + 5_000)).toBe('14:05');
+    expect(formatCountdown(9_400)).toBe('0:09');
+    expect(formatCountdown(3_600_000)).toBe('1:00:00');
+  });
+
+  it('never goes below zero and shows a dash for a value that is not a number', () => {
+    expect(formatCountdown(-5_000)).toBe('0:00');
+    expect(formatCountdown(Number.NaN)).toBe('—');
+  });
+});
+
+describe('formatClock', () => {
+  it('shows the local time of day on 24 hours', () => {
+    // Built from local fields, so the test holds in any time zone.
+    expect(formatClock(new Date(2026, 10, 3, 4, 7).getTime())).toBe('04:07');
+    expect(formatClock(new Date(2026, 10, 3, 23, 59).getTime())).toBe('23:59');
+    expect(formatClock(Number.NaN)).toBe('—');
   });
 });
 
