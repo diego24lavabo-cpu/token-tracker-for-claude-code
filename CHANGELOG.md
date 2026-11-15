@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-15
+
+The builds are not code-signed yet: see the README for how to open them the first time on macOS and Windows.
+
 ### Added
 
 - A **Live** page (second item of the sidebar; Ctrl/Cmd+2, Settings is now 9): the 5-hour usage window rebuilt from the times of Claude Code's responses, with its tokens and start time, the reset time and a countdown, the speed over the last 15 minutes, an estimated usage and the time the limit would be reached at this speed ("Limit reached at ~14:05", or "Resets first"). The estimates are in API prices and are labeled as such: usage on other computers or on claude.ai is not in these logs. Below, a chart of tokens per minute by project over the last 1, 3 or 6 hours (marks: window start and now), the projects active right now with their models, and one line per machine. It refreshes when the logs change and every minute; a notice says so when file watching is off.
@@ -67,5 +71,6 @@ Built and tested, but never published (replaced by 0.1.1). The builds are not co
 - "No logs found" state with a folder picker.
 - Repository files: license, contribution guide, security policy, issue and pull request templates, CI workflow.
 
-[Unreleased]: https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code/releases/tag/v0.1.2
 [0.1.1]: https://github.com/diego24lavabo-cpu/token-tracker-for-claude-code/releases/tag/v0.1.1
