@@ -26,6 +26,7 @@ import type {
   AddFolderResult,
   Agents,
   AppInfo,
+  CalibrateResult,
   Calendar,
   ChooseFolderResult,
   DeleteMachineResult,
@@ -77,6 +78,7 @@ import {
   readRetention,
   writeCleanupDays,
 } from './claudeSettings';
+import { ClaudeUsageReader } from './claudeUsage';
 import { buildCsvTable, csvFileName, toCsv } from './csv';
 import { UsageDatabase } from './db';
 import {
@@ -86,10 +88,20 @@ import {
   type DemoEnvironment,
 } from './demo';
 import { syncFolderFromPick } from './drive';
-import { emptyLive, getLive, parseLiveHours } from './live';
+import {
+  calibrate,
+  emptyLive,
+  getLive,
+  parseCalibrationPercent,
+  parseLiveHours,
+  parseReferenceChoice,
+  setReferenceChoice,
+  type ClaudeSource,
+} from './live';
 import { installAppMenu } from './menu';
 import { readPreferences, writePreferences } from './preferences';
 import {
+  claudeConfigFile,
   claudeSettingsFile,
   defaultLogRoot,
   existingLogRoots,
@@ -105,6 +117,7 @@ import {
   getExtraLogRoots,
   getFileWatching,
   getKnownProjects,
+  getReadClaudeUsage,
   getUsedModels,
   parseCleanupDays,
   parseCsvKind,
@@ -113,6 +126,7 @@ import {
   parseSettingsPatch,
   setExtraLogRoots,
   setFileWatching,
+  setReadClaudeUsage,
 } from './settings';
 import { SyncService } from './sync';
 import { SYNC_FOLDER_NAME } from './syncFormat';
@@ -222,6 +236,19 @@ function autoLogRoots(): string[] {
 /** Claude Code's settings file; in demo mode a file that does not exist. */
 function claudeSettings(): string {
   return demo ? demo.claudeSettingsFile : claudeSettingsFile();
+}
+
+/** Claude Code's config file, for its cached usage %; in demo mode one in the demo folder. */
+function claudeConfig(): string {
+  return demo ? demo.claudeConfigFile : claudeConfigFile();
+}
+
+const claudeUsage = new ClaudeUsageReader(claudeConfig);
+
+/** Claude Code's own 5-hour numbers, read only while the Settings switch is on. */
+async function claudeSource(db: UsageDatabase): Promise<ClaudeSource> {
+  if (!getReadClaudeUsage(db)) return { enabled: false, usage: null };
+  return { enabled: true, usage: (await claudeUsage.read()).usage };
 }
 
 /** The folders found by the app plus those added in Settings, that exist. */
@@ -359,6 +386,8 @@ async function buildSettings(): Promise<SettingsData> {
   const settingsFile = claudeSettings();
   const retention = readRetention(settingsFile);
   const unavailable = launchAtLoginUnavailable();
+  const readClaude = db !== null && getReadClaudeUsage(db);
+  const claudeRead = readClaude ? await claudeUsage.read() : null;
 
   return {
     available: db !== null && !demo,
@@ -401,6 +430,12 @@ async function buildSettings(): Promise<SettingsData> {
       launchAtLoginUnavailable: unavailable,
       fileWatching: db ? getFileWatching(db) : false,
       dataFolder: tildify(dataFolder()),
+      claudeUsage: {
+        enabled: readClaude,
+        file: tildify(claudeConfig()),
+        state: claudeRead?.state ?? 'off',
+        last: claudeRead?.usage ?? null,
+      },
     },
   };
 }
@@ -484,6 +519,11 @@ async function applySettings(input: unknown): Promise<SettingsData> {
     else await serial(() => updateWatcher());
   }
   if (patch.syncEnabled !== undefined) await sync.setEnabled(patch.syncEnabled);
+  if (patch.readClaudeUsage !== undefined) {
+    setReadClaudeUsage(db, patch.readClaudeUsage);
+    // Off: nothing read is kept.
+    if (!patch.readClaudeUsage) claudeUsage.forget();
+  }
 
   notifyUsageUpdated();
   return buildSettings();
@@ -842,10 +882,28 @@ function registerIpc(): void {
     return database ? getOverview(database, pricing, filters) : emptyOverview(filters);
   });
 
-  handle<Live>(IPC.getLive, (_event, machinesInput, hoursInput) => {
+  handle<Live>(IPC.getLive, async (_event, machinesInput, hoursInput) => {
     const machineIds = parseMachineIds(machinesInput);
     const hours = parseLiveHours(hoursInput);
-    return database ? getLive(database, pricing, machineIds, hours) : emptyLive(hours);
+    const db = database;
+    if (!db) return emptyLive(hours);
+    const claude = await claudeSource(db);
+    // The database may have closed during the read (the app quitting).
+    if (database !== db) return emptyLive(hours);
+    return getLive(db, pricing, machineIds, hours, Date.now(), claude);
+  });
+
+  handle<CalibrateResult>(IPC.calibrateLive, (_event, percentInput) => {
+    const percent = parseCalibrationPercent(percentInput);
+    const result = calibrate(requireWritableDatabase(), pricing, percent);
+    if (result.status === 'done') notifyUsageUpdated();
+    return result;
+  });
+
+  handle<void>(IPC.setLiveReference, (_event, choiceInput) => {
+    const choice = parseReferenceChoice(choiceInput);
+    setReferenceChoice(requireWritableDatabase(), choice);
+    notifyUsageUpdated();
   });
 
   handle<Projects>(IPC.getProjects, (_event, input) => {

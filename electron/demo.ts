@@ -42,6 +42,8 @@ export interface DemoEnvironment {
   syncFolder: string;
   /** Where Claude Code's settings would be: a file that never exists. */
   claudeSettingsFile: string;
+  /** Where Claude Code's config (its cached usage %) would be: the demo never writes it. */
+  claudeConfigFile: string;
   machineName: string;
 }
 
@@ -96,6 +98,7 @@ export function createDemoEnvironment(
     logRoot: path.join(root, 'logs', 'this-machine', 'projects'),
     syncFolder: path.join(root, 'My Drive', SYNC_FOLDER_NAME),
     claudeSettingsFile: path.join(root, 'claude', 'settings.json'),
+    claudeConfigFile: path.join(root, 'claude', '.claude.json'),
     machineName: local.name,
   };
 }

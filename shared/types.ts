@@ -762,16 +762,35 @@ export interface LiveBurn {
 }
 
 /**
- * What an estimated limit is based on. `largestWindow`: the past window with the most
- * units, taken as 100% (not the real limit).
+ * What the estimates take as 100%:
+ * - `largestWindow`: the past window with the most units (not the real limit).
+ * - `calibration`: the % that Claude's `/usage` showed, entered by the user: the limit is
+ *   the window's units at that moment ÷ that %.
+ * - `claude`: Claude Code's own 5-hour % (`cachedUsageUtilization` in `~/.claude.json`),
+ *   while its reset is still ahead. Its reset time replaces the rebuilt one.
  */
+export type LiveReferenceKind = 'largestWindow' | 'calibration' | 'claude';
+
+/** The reference choice stored in Settings; `claude` applies by itself when fresh. */
+export type LiveReferenceChoice = 'largestWindow' | 'calibration';
+
 export interface LiveReference {
-  kind: 'largestWindow';
-  units: number;
-  /** All token types of that window. */
-  tokens: number;
-  start: number;
-  startAt: LocalDayTime;
+  kind: LiveReferenceKind;
+  /**
+   * The limit (100%) in API-price units. Under `claude`, derived from Claude's % and this
+   * machine's units at that moment, else the chosen reference's; null when neither exists.
+   */
+  units: number | null;
+  /**
+   * `largestWindow`: that window's start. `calibration`: when the % was entered. `claude`:
+   * when Claude Code fetched its numbers. Epoch milliseconds.
+   */
+  at: number;
+  atTime: LocalDayTime;
+  /** `largestWindow`: all token types of that window; else null. */
+  tokens: number | null;
+  /** `calibration` and `claude`: the % Claude showed at `at`; else null. */
+  percent: number | null;
 }
 
 /**
@@ -779,18 +798,57 @@ export interface LiveReference {
  * - `limitFirst`: at the current speed, the reference is reached at `limitAt`.
  * - `reached`: the window is already at or above the reference.
  * - `noRate`: nothing used in the last `BURN_MINUTES` minutes.
+ * - `noLimit`: Claude's % is known but no limit to extrapolate with (`reference.units` null).
  */
-export type LiveOutcome = 'resetsFirst' | 'limitFirst' | 'reached' | 'noRate';
+export type LiveOutcome = 'resetsFirst' | 'limitFirst' | 'reached' | 'noRate' | 'noLimit';
 
-/** An estimate, never Claude's own number. */
+/** An estimate. Under `claude` it starts from Claude's own % and adds the usage since. */
 export interface LiveEstimate {
   reference: LiveReference;
-  /** The window's units as a share of the reference, in % (above 100 past it). */
+  /** The window's share of the reference, in % (above 100 past it). */
   percent: number;
   outcome: LiveOutcome;
   /** With `limitFirst`: when the reference would be reached, epoch milliseconds. */
   limitAt: number | null;
   limitAtTime: LocalDayTime | null;
+  /** When the window resets: Claude's time under `claude`, else the rebuilt window's end. */
+  resetsAt: number;
+  resetsAtTime: LocalDayTime;
+}
+
+/** Claude Code's own 5-hour numbers, as last saved in its config file. */
+export interface ClaudeUsage {
+  /** When Claude Code fetched them, epoch milliseconds. */
+  fetchedAt: number;
+  /** The 5-hour usage, in % (0–100). */
+  percent: number;
+  /** When the 5-hour window resets, epoch milliseconds. */
+  resetsAt: number;
+}
+
+/** A calibration entered on the Live page. */
+export interface LiveCalibration {
+  /** When it was entered, epoch milliseconds. */
+  at: number;
+  atTime: LocalDayTime;
+  /** The % Claude's `/usage` showed. */
+  percent: number;
+  /** The limit it gives, in API-price units; null when its window is no longer found. */
+  units: number | null;
+}
+
+/** The reference settings and sources, for the Live page's reference card. */
+export interface LiveReferenceInfo {
+  choice: LiveReferenceChoice;
+  /** The finished window with the most units, or null. */
+  largest: { start: number; startAt: LocalDayTime; units: number } | null;
+  calibration: LiveCalibration | null;
+  /** False when reading Claude Code's numbers is turned off in Settings. */
+  claudeEnabled: boolean;
+  /** Claude Code's last numbers (null when off, missing or unreadable). */
+  claude: (ClaudeUsage & { fetchedAtTime: LocalDayTime; fresh: boolean }) | null;
+  /** True when a window is running on this machine, so a calibration can be entered. */
+  canCalibrate: boolean;
 }
 
 /**
@@ -834,7 +892,10 @@ export interface Live {
   active: LiveProject[];
   /** The selected machines, this one first. */
   machines: LiveMachine[];
+  reference: LiveReferenceInfo;
 }
+
+export type CalibrateResult = { status: 'done' } | { status: 'noWindow' };
 
 // ── Sync ──────────────────────────────────────────────────────────────────────
 
@@ -975,8 +1036,22 @@ export interface SettingsData {
     fileWatching: boolean;
     /** The app's data folder (database, pricing.json), shortened with `~`. */
     dataFolder: string;
+    /** Reading Claude Code's own 5-hour % for the Live page. */
+    claudeUsage: {
+      enabled: boolean;
+      /** Claude Code's config file, shortened with `~`. */
+      file: string;
+      /**
+       * `off`: not read. `found`: read (`last`). `missing`: no file. `noData`: the file has no
+       * usage numbers (Claude Code saves them after `/usage`). `unreadable`: not as expected.
+       */
+      state: ClaudeUsageState;
+      last: ClaudeUsage | null;
+    };
   };
 }
+
+export type ClaudeUsageState = 'off' | 'found' | 'missing' | 'noData' | 'unreadable';
 
 export interface SettingsPatch {
   launchAtLogin?: boolean;
@@ -989,6 +1064,8 @@ export interface SettingsPatch {
   /** Turns sync on or off. Turning it on looks for the Google Drive folder if none is set. */
   syncEnabled?: boolean;
   machineName?: string;
+  /** Reading Claude Code's own 5-hour % on or off. */
+  readClaudeUsage?: boolean;
 }
 
 export type CsvKind = 'daily' | 'projects' | 'models' | 'agentTypes';
@@ -1020,6 +1097,10 @@ export interface Api {
   getOverview(filters: Filters): Promise<Overview>;
   /** The last `hours` hours minute by minute, and each machine's 5-hour window. */
   getLive(machineIds: string[] | undefined, hours: LiveHours): Promise<Live>;
+  /** Stores the % Claude's `/usage` shows now, for the running window; then `usageUpdated`. */
+  calibrateLive(percent: number): Promise<CalibrateResult>;
+  /** Picks what the estimates take as 100% when Claude's own % is not current. */
+  setLiveReference(choice: LiveReferenceChoice): Promise<void>;
   getProjects(filters: Filters): Promise<Projects>;
   /** With `folder`, the whole container folder `project` (every subfolder and its top). */
   getProjectDetail(project: string, filters: Filters, folder?: boolean): Promise<ProjectDetail>;

@@ -10,14 +10,20 @@ import {
   currentWindow,
   emptyLive,
   estimate,
+  calibrate,
   getLive,
+  getReferenceChoice,
   largestWindow,
   LIVE_SERIES,
   localWindows,
   MINUTE_MS,
+  parseCalibrationPercent,
   parseLiveHours,
+  parseReferenceChoice,
+  setReferenceChoice,
   weigh,
   WINDOW_MS,
+  type EstimateBasis,
   type UsagePoint,
   type UsageWindow,
 } from '../electron/live';
@@ -194,22 +200,16 @@ describe('5-hour windows', () => {
 });
 
 describe('estimate', () => {
-  const window: UsageWindow = {
-    start: T0,
-    end: T0 + WINDOW_MS,
-    last: T0 + HOUR,
-    tokens: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 },
-    units: 4,
-    unpriced: 0,
-    responses: 2,
-  };
   const reference: LiveReference = {
     kind: 'largestWindow',
     units: 10,
+    at: 0,
+    atTime: { day: '2026-11-09', time: '08:00' },
     tokens: 0,
-    start: 0,
-    startAt: { day: '2026-11-09', time: '08:00' },
+    percent: null,
   };
+  // 4 units used of 10, the window resets 4 hours after `now`.
+  const basis: EstimateBasis = { reference, basePercent: 0, units: 4, resetsAt: T0 + WINDOW_MS };
   const burn = (unitsPerMinute: number): LiveBurn => ({
     minutes: BURN_MINUTES,
     tokensPerMinute: 0,
@@ -220,30 +220,58 @@ describe('estimate', () => {
 
   it('says when the reference is reached at the current speed', () => {
     // 6 units left at 0.1 per minute: 60 minutes, before the reset 4 hours later.
-    const result = estimate(window, reference, burn(0.1), now, timeOf);
+    const result = estimate(basis, burn(0.1), now, timeOf);
     expect(result.percent).toBeCloseTo(40, 10);
     expect(result.outcome).toBe('limitFirst');
     expect(result.limitAt).toBeCloseTo(now + 60 * MINUTE_MS, 3);
     expect(result.limitAtTime?.time).toBe(String(result.limitAt));
+    expect(result).toMatchObject({
+      resetsAt: T0 + WINDOW_MS,
+      resetsAtTime: { time: String(T0 + WINDOW_MS) },
+    });
   });
 
   it('says when the window resets first', () => {
-    const result = estimate(window, reference, burn(0.01), now, timeOf);
+    const result = estimate(basis, burn(0.01), now, timeOf);
     expect(result).toMatchObject({ outcome: 'resetsFirst', limitAt: null, limitAtTime: null });
     // Reaching the reference exactly at the reset: the reset comes first.
-    const resetIn96 = { ...window, end: now + 96 * MINUTE_MS };
-    expect(estimate(resetIn96, reference, burn(6 / 96), now, timeOf).outcome).toBe('resetsFirst');
-    expect(estimate(resetIn96, reference, burn(6 / 95), now, timeOf).outcome).toBe('limitFirst');
+    const resetIn96 = { ...basis, resetsAt: now + 96 * MINUTE_MS };
+    expect(estimate(resetIn96, burn(6 / 96), now, timeOf).outcome).toBe('resetsFirst');
+    expect(estimate(resetIn96, burn(6 / 95), now, timeOf).outcome).toBe('limitFirst');
   });
 
   it('says when nothing is being used', () => {
-    expect(estimate(window, reference, burn(0), now, timeOf).outcome).toBe('noRate');
+    expect(estimate(basis, burn(0), now, timeOf).outcome).toBe('noRate');
   });
 
   it('says when the reference is already reached', () => {
-    const result = estimate({ ...window, units: 12 }, reference, burn(1), now, timeOf);
+    const result = estimate({ ...basis, units: 12 }, burn(1), now, timeOf);
     expect(result.outcome).toBe('reached');
     expect(result.percent).toBeCloseTo(120, 10);
+  });
+
+  it('starts from a base % and adds the units on top', () => {
+    // 30% already used, 2 more units of 10: 50%; 5 units left at 0.1 per minute.
+    const result = estimate({ ...basis, basePercent: 30, units: 2 }, burn(0.1), now, timeOf);
+    expect(result.percent).toBeCloseTo(50, 10);
+    expect(result.outcome).toBe('limitFirst');
+    expect(result.limitAt).toBeCloseTo(now + 50 * MINUTE_MS, 3);
+    expect(estimate({ ...basis, basePercent: 95, units: 1 }, burn(1), now, timeOf)).toMatchObject({
+      outcome: 'reached',
+      percent: 105,
+    });
+  });
+
+  it('keeps the base % alone without a limit', () => {
+    const noLimit = { ...basis, reference: { ...reference, units: null }, basePercent: 22 };
+    expect(estimate(noLimit, burn(1), now, timeOf)).toMatchObject({
+      outcome: 'noLimit',
+      percent: 22,
+      limitAt: null,
+    });
+    expect(estimate({ ...noLimit, basePercent: 100 }, burn(1), now, timeOf).outcome).toBe(
+      'reached',
+    );
   });
 });
 
@@ -449,10 +477,12 @@ describe('getLive', () => {
     expect(machine?.estimate?.reference).toMatchObject({
       kind: 'largestWindow',
       tokens: tokensOf(big) * 2,
-      start: NOW - 24 * HOUR,
-      startAt: { day: '2026-11-09', time: '12:00' },
+      at: NOW - 24 * HOUR,
+      atTime: { day: '2026-11-09', time: '12:00' },
+      percent: null,
     });
     expect(machine?.estimate?.reference.units).toBeCloseTo(reference, 15);
+    expect(machine?.estimate?.resetsAt).toBe(NOW + 3 * HOUR);
     expect(machine?.estimate?.percent).toBeCloseTo((used / reference) * 100, 10);
     expect(machine?.estimate?.outcome).toBe('limitFirst');
     expect(machine?.estimate?.limitAt).toBeCloseTo(
@@ -654,5 +684,258 @@ describe('window history', () => {
     const later = getLive(db, PRICING, undefined, 1, NOW + 2 * HOUR + MINUTE_MS).machines[0];
     expect(later?.window).toMatchObject({ start: NOW - HOUR, responses: 2 });
     expect(later?.lastResponse).toBe(NOW + 2 * HOUR);
+  });
+});
+
+describe('reference settings', () => {
+  it('checks the choice and the percentage', () => {
+    expect(parseReferenceChoice('calibration')).toBe('calibration');
+    expect(parseReferenceChoice('largestWindow')).toBe('largestWindow');
+    for (const bad of ['claude', '', null, 1]) {
+      expect(() => parseReferenceChoice(bad)).toThrow(InvalidRequestError);
+    }
+    expect(parseCalibrationPercent(38)).toBe(38);
+    expect(parseCalibrationPercent(38.46)).toBe(38.5);
+    expect(parseCalibrationPercent(100)).toBe(100);
+    expect(parseCalibrationPercent(0.01)).toBe(0.1);
+    for (const bad of [0, -5, 100.1, Number.NaN, Number.POSITIVE_INFINITY, '38', null]) {
+      expect(() => parseCalibrationPercent(bad)).toThrow(InvalidRequestError);
+    }
+  });
+
+  it('keeps the largest window until the user picks the calibration', () => {
+    const db = openMemoryDb();
+    open.push(db);
+    expect(getReferenceChoice(db)).toBe('largestWindow');
+    setReferenceChoice(db, 'calibration');
+    expect(getReferenceChoice(db)).toBe('calibration');
+    setReferenceChoice(db, 'largestWindow');
+    expect(getReferenceChoice(db)).toBe('largestWindow');
+  });
+});
+
+describe('calibration', () => {
+  // The running window starts at NOW - 2 h; a big finished window the day before.
+  const big: Usage = [100, 50, 0, 600];
+  const HISTORY: Response[] = [
+    { at: NOW - 24 * HOUR, u: big, session: SESSION_C },
+    { at: NOW - 2 * HOUR },
+    { at: NOW - 40 * MINUTE_MS },
+  ];
+
+  it('takes the units at that moment ÷ the % as the limit', async () => {
+    const { db, root } = await liveDb(HISTORY);
+    const atCalibration = opusUnits(DEFAULT_USAGE) * 2;
+    expect(calibrate(db, PRICING, 25, NOW)).toEqual({ status: 'done' });
+    expect(getReferenceChoice(db)).toBe('calibration');
+
+    // Half an hour later, two more responses.
+    // Another session, so the earlier lines are not written again (with new ids).
+    writeResponses(root, [
+      { at: NOW + 10 * MINUTE_MS, session: SESSION_B },
+      { at: NOW + 20 * MINUTE_MS, u: [20, 10, 0, 200], session: SESSION_B },
+    ]);
+    await scanLogs(db, [root]);
+    const later = NOW + 30 * MINUTE_MS;
+    const live = getLive(db, PRICING, undefined, 3, later);
+    const limit = atCalibration / 0.25;
+    const used = atCalibration + opusUnits(DEFAULT_USAGE) + opusUnits([20, 10, 0, 200]);
+
+    const estimateNow = live.machines[0]?.estimate;
+    expect(estimateNow?.reference).toMatchObject({
+      kind: 'calibration',
+      at: NOW,
+      atTime: { day: '2026-11-10', time: '12:00' },
+      percent: 25,
+      tokens: null,
+    });
+    expect(estimateNow?.reference.units).toBeCloseTo(limit, 15);
+    expect(estimateNow?.percent).toBeCloseTo((used / limit) * 100, 10);
+    expect(estimateNow?.resetsAt).toBe(NOW + 3 * HOUR);
+
+    expect(live.reference).toMatchObject({
+      choice: 'calibration',
+      calibration: { at: NOW, percent: 25 },
+      canCalibrate: true,
+      claudeEnabled: false,
+      claude: null,
+    });
+    expect(live.reference.calibration?.units).toBeCloseTo(limit, 15);
+    expect(live.reference.largest?.start).toBe(NOW - 24 * HOUR);
+  });
+
+  it('applies to later windows, and does not change with the prices', async () => {
+    const { db, root } = await liveDb(HISTORY);
+    calibrate(db, PRICING, 20, NOW);
+    // A new window the next day.
+    const nextDay = NOW + 24 * HOUR;
+    writeResponses(root, [{ at: nextDay - HOUR, session: SESSION_B }]);
+    await scanLogs(db, [root]);
+
+    const limit = (opusUnits(DEFAULT_USAGE) * 2) / 0.2;
+    const estimateNext = getLive(db, PRICING, undefined, 1, nextDay).machines[0]?.estimate;
+    expect(estimateNext?.reference.kind).toBe('calibration');
+    expect(estimateNext?.percent).toBeCloseTo((opusUnits(DEFAULT_USAGE) / limit) * 100, 10);
+
+    // Doubled prices double both sides: the % stays.
+    const doubled: Pricing = {
+      lastChecked: null,
+      models: Object.fromEntries(
+        Object.entries(PRICING.models).map(([model, price]) => [
+          model,
+          {
+            input: price.input * 2,
+            output: price.output * 2,
+            cacheWrite: price.cacheWrite * 2,
+            cacheWrite1h: price.cacheWrite1h * 2,
+            cacheRead: price.cacheRead * 2,
+          },
+        ]),
+      ),
+    };
+    const estimateDoubled = getLive(db, doubled, undefined, 1, nextDay).machines[0]?.estimate;
+    expect(estimateDoubled?.reference.units).toBeCloseTo(limit * 2, 15);
+    expect(estimateDoubled?.percent).toBeCloseTo(estimateNext?.percent ?? 0, 10);
+  });
+
+  it('is refused without a running window', async () => {
+    const { db } = await liveDb([{ at: NOW - 7 * HOUR }]);
+    expect(calibrate(db, PRICING, 30, NOW)).toEqual({ status: 'noWindow' });
+    expect(getReferenceChoice(db)).toBe('largestWindow');
+    expect(getLive(db, PRICING, undefined, 1, NOW).reference).toMatchObject({
+      calibration: null,
+      canCalibrate: false,
+    });
+    // A window with only unpriced usage cannot be calibrated either.
+    const { db: unpriced } = await liveDb([{ at: NOW - HOUR, model: 'claude-haiku-9-9' }]);
+    expect(calibrate(unpriced, PRICING, 30, NOW)).toEqual({ status: 'noWindow' });
+  });
+
+  it('falls back to the largest window when its window is gone or not chosen', async () => {
+    const { db } = await liveDb(HISTORY);
+    // A moment no window holds (between the two windows).
+    db.setSetting('live_calibration', JSON.stringify({ at: NOW - 10 * HOUR, percent: 20 }));
+    setReferenceChoice(db, 'calibration');
+    const live = getLive(db, PRICING, undefined, 3, NOW);
+    expect(live.machines[0]?.estimate?.reference.kind).toBe('largestWindow');
+    expect(live.reference.calibration).toMatchObject({ at: NOW - 10 * HOUR, units: null });
+
+    calibrate(db, PRICING, 20, NOW);
+    setReferenceChoice(db, 'largestWindow');
+    const chosen = getLive(db, PRICING, undefined, 3, NOW);
+    expect(chosen.machines[0]?.estimate?.reference.kind).toBe('largestWindow');
+    expect(chosen.reference.calibration?.units).not.toBeNull();
+  });
+
+  it('ignores a stored calibration that is not as expected', async () => {
+    const { db } = await liveDb(HISTORY);
+    for (const stored of ['{', '[]', '{"at":"x","percent":20}', '{"at":1,"percent":0}']) {
+      db.setSetting('live_calibration', stored);
+      expect(getLive(db, PRICING, undefined, 3, NOW).reference.calibration).toBeNull();
+    }
+  });
+});
+
+describe('Claude’s own numbers', () => {
+  // The running window starts at NOW - 2 h. Claude's window started earlier, at NOW - 3 h
+  // (another computer), and resets at NOW + 2 h; Claude Code fetched 40% at NOW - 30 min.
+  const RUNNING: Response[] = [
+    { at: NOW - 2 * HOUR },
+    { at: NOW - 40 * MINUTE_MS, project: 'web-shop', model: 'claude-sonnet-5-5' },
+    { at: NOW - 10 * MINUTE_MS, u: [20, 10, 0, 200] },
+    { at: NOW - 2 * MINUTE_MS, project: 'web-shop', session: SESSION_B },
+  ];
+  const sonnetUnits = (20 + 50 + 50) / 1e6;
+  const usage = { fetchedAt: NOW - 30 * MINUTE_MS, percent: 40, resetsAt: NOW + 2 * HOUR };
+
+  it('starts from Claude’s % and its reset time, and adds the usage since', async () => {
+    const { db } = await liveDb(RUNNING);
+    const live = getLive(db, PRICING, undefined, 3, NOW, { enabled: true, usage });
+    const before = opusUnits(DEFAULT_USAGE) + sonnetUnits;
+    const since = opusUnits([20, 10, 0, 200]) + opusUnits(DEFAULT_USAGE);
+    const limit = before / 0.4;
+
+    const result = live.machines[0]?.estimate;
+    expect(result?.reference).toMatchObject({
+      kind: 'claude',
+      at: usage.fetchedAt,
+      atTime: { day: '2026-11-10', time: '11:30' },
+      percent: 40,
+      tokens: null,
+    });
+    expect(result?.reference.units).toBeCloseTo(limit, 15);
+    expect(result?.percent).toBeCloseTo(40 + (since / limit) * 100, 10);
+    // Claude's reset, not the rebuilt window's (NOW + 3 h).
+    expect(result).toMatchObject({
+      resetsAt: NOW + 2 * HOUR,
+      resetsAtTime: { day: '2026-11-10', time: '14:00' },
+    });
+    expect(live.machines[0]?.window?.end).toBe(NOW + 3 * HOUR);
+    expect(live.reference).toMatchObject({
+      claudeEnabled: true,
+      claude: { ...usage, fresh: true, fetchedAtTime: { time: '11:30' } },
+    });
+  });
+
+  it('uses the chosen reference’s limit when Claude’s % cannot give one', async () => {
+    // No response of this machine before Claude's numbers were fetched.
+    const big: Usage = [100, 50, 0, 600];
+    const { db } = await liveDb([
+      { at: NOW - 24 * HOUR, u: big, session: SESSION_C },
+      { at: NOW - 10 * MINUTE_MS },
+    ]);
+    const live = getLive(db, PRICING, undefined, 3, NOW, { enabled: true, usage });
+    const result = live.machines[0]?.estimate;
+    const largest = opusUnits(big);
+    expect(result?.reference.kind).toBe('claude');
+    expect(result?.reference.units).toBeCloseTo(largest, 15);
+    expect(result?.percent).toBeCloseTo(40 + (opusUnits(DEFAULT_USAGE) / largest) * 100, 10);
+
+    // Nothing to take a limit from: Claude's % alone.
+    const { db: alone } = await liveDb([{ at: NOW - 10 * MINUTE_MS }]);
+    const single = getLive(alone, PRICING, undefined, 3, NOW, { enabled: true, usage });
+    expect(single.machines[0]?.estimate).toMatchObject({
+      outcome: 'noLimit',
+      percent: 40,
+      reference: { kind: 'claude', units: null },
+    });
+  });
+
+  it('never takes a limit below the largest window, nor from under 5%', async () => {
+    // A large finished window; then Claude says 40% while this machine used little.
+    const big: Usage = [100, 50, 0, 600];
+    const { db } = await liveDb([{ at: NOW - 24 * HOUR, u: big, session: SESSION_C }, ...RUNNING]);
+    const largest = opusUnits(big);
+    const derived = (opusUnits(DEFAULT_USAGE) + sonnetUnits) / 0.4;
+    expect(derived).toBeLessThan(largest);
+    const floored = getLive(db, PRICING, undefined, 3, NOW, { enabled: true, usage });
+    expect(floored.machines[0]?.estimate?.reference.units).toBeCloseTo(largest, 15);
+
+    // 4%: too coarse, the chosen reference's limit (the largest window) is used.
+    const coarse = { ...usage, percent: 4 };
+    const low = getLive(db, PRICING, undefined, 3, NOW, { enabled: true, usage: coarse });
+    expect(low.machines[0]?.estimate?.reference).toMatchObject({ kind: 'claude', percent: 4 });
+    expect(low.machines[0]?.estimate?.reference.units).toBeCloseTo(largest, 15);
+  });
+
+  it('is left out once its reset has passed, or when turned off', async () => {
+    const big: Usage = [100, 50, 0, 600];
+    const { db } = await liveDb([{ at: NOW - 24 * HOUR, u: big, session: SESSION_C }, ...RUNNING]);
+    const old = { fetchedAt: NOW - 8 * HOUR, percent: 70, resetsAt: NOW - 4 * HOUR };
+    const stale = getLive(db, PRICING, undefined, 3, NOW, { enabled: true, usage: old });
+    expect(stale.machines[0]?.estimate?.reference.kind).toBe('largestWindow');
+    expect(stale.machines[0]?.estimate?.resetsAt).toBe(NOW + 3 * HOUR);
+    expect(stale.reference.claude).toMatchObject({ percent: 70, fresh: false });
+
+    const off = getLive(db, PRICING, undefined, 3, NOW, { enabled: false, usage });
+    expect(off.machines[0]?.estimate?.reference.kind).toBe('largestWindow');
+    expect(off.reference).toMatchObject({ claudeEnabled: false, claude: null });
+  });
+
+  it('gives no estimate without a running window on this machine', async () => {
+    const { db } = await liveDb([{ at: NOW - 7 * HOUR }]);
+    const live = getLive(db, PRICING, undefined, 3, NOW, { enabled: true, usage });
+    expect(live.machines[0]).toMatchObject({ status: 'idle', estimate: null });
+    expect(live.reference.claude?.fresh).toBe(true);
   });
 });

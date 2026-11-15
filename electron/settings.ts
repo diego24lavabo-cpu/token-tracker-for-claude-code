@@ -20,6 +20,7 @@ import { isMachineId } from './syncFormat';
 
 const SETTING_FILE_WATCHING = 'file_watching';
 const SETTING_EXTRA_ROOTS = 'extra_log_roots';
+const SETTING_READ_CLAUDE_USAGE = 'read_claude_usage';
 
 const MAX_MACHINE_NAME = 60;
 const MAX_KNOWN_PROJECTS = 2_000;
@@ -35,6 +36,15 @@ export function getFileWatching(db: UsageDatabase): boolean {
 
 export function setFileWatching(db: UsageDatabase, on: boolean): void {
   db.setSetting(SETTING_FILE_WATCHING, on ? '1' : '0');
+}
+
+/** Reading Claude Code's own 5-hour % is on unless the user turned it off. */
+export function getReadClaudeUsage(db: UsageDatabase): boolean {
+  return db.getSetting(SETTING_READ_CLAUDE_USAGE) !== '0';
+}
+
+export function setReadClaudeUsage(db: UsageDatabase, on: boolean): void {
+  db.setSetting(SETTING_READ_CLAUDE_USAGE, on ? '1' : '0');
 }
 
 /** The `projects` folders added by the user, as absolute paths. */
@@ -116,7 +126,7 @@ export function parseSettingsPatch(value: unknown): SettingsPatch {
   const input = value as Record<string, unknown>;
   const patch: SettingsPatch = {};
 
-  for (const key of ['launchAtLogin', 'fileWatching'] as const) {
+  for (const key of ['launchAtLogin', 'fileWatching', 'readClaudeUsage'] as const) {
     if (input[key] === undefined) continue;
     if (typeof input[key] !== 'boolean') throw new InvalidRequestError(`${key} must be a boolean`);
     patch[key] = input[key];

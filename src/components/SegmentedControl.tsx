@@ -1,6 +1,8 @@
 export interface SegmentedOption<T extends string> {
   value: T;
   label: string;
+  /** Turns this option off and says why. */
+  disabledReason?: string;
 }
 
 interface SegmentedControlProps<T extends string> {
@@ -49,8 +51,8 @@ export function SegmentedControl<T extends string>({
           type="button"
           className="segmented-option"
           aria-pressed={option.value === value}
-          title={disabledReason ?? option.label}
-          disabled={disabled}
+          title={disabledReason ?? option.disabledReason ?? option.label}
+          disabled={disabled || option.disabledReason !== undefined}
           onClick={() => onChange(option.value)}
         >
           {option.label}

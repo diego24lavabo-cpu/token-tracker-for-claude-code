@@ -18,19 +18,26 @@ import {
 import { buildCsvTable, csvFileName, toCsv } from '../electron/csv';
 import { setLanguage } from '../src/i18n';
 import type { UsageDatabase } from '../electron/db';
-import { claudeSettingsFile, logFolderFromPick, samePath } from '../electron/paths';
+import {
+  claudeConfigFile,
+  claudeSettingsFile,
+  logFolderFromPick,
+  samePath,
+} from '../electron/paths';
 import { DEFAULT_PRICING, validatePricing } from '../electron/pricing';
 import { scanLogs } from '../electron/scanner';
 import {
   getContainerCandidates,
   getExtraLogRoots,
   getFileWatching,
+  getReadClaudeUsage,
   getUsedModels,
   parseCleanupDays,
   parseCsvKind,
   parseSettingsPatch,
   setExtraLogRoots,
   setFileWatching,
+  setReadClaudeUsage,
 } from '../electron/settings';
 import type { Filters, Pricing } from '../shared/types';
 import {
@@ -246,6 +253,12 @@ describe('settings', () => {
     setFileWatching(db, false);
     expect(getFileWatching(db)).toBe(false);
 
+    expect(getReadClaudeUsage(db)).toBe(true);
+    setReadClaudeUsage(db, false);
+    expect(getReadClaudeUsage(db)).toBe(false);
+    setReadClaudeUsage(db, true);
+    expect(getReadClaudeUsage(db)).toBe(true);
+
     expect(getExtraLogRoots(db)).toEqual([]);
     setExtraLogRoots(db, ['/data/projects', '/data/projects', '/other/projects']);
     expect(getExtraLogRoots(db)).toEqual(['/data/projects', '/other/projects']);
@@ -321,12 +334,14 @@ describe('settings', () => {
     expect(
       parseSettingsPatch({ fileWatching: false, launchAtLogin: true, containerProjects: ['a'] }),
     ).toEqual({ fileWatching: false, launchAtLogin: true, containerProjects: ['a'] });
+    expect(parseSettingsPatch({ readClaudeUsage: false })).toEqual({ readClaudeUsage: false });
     expect(parseSettingsPatch({ pricing: PRICING }).pricing?.models['Opus 5.5']).toEqual(flat);
 
     for (const bad of [
       null,
       'x',
       { fileWatching: 'yes' },
+      { readClaudeUsage: 1 },
       { containerProjects: 'a' },
       { containerProjects: [''] },
       { containerProjects: [1] },
@@ -427,6 +442,22 @@ describe('path helpers', () => {
         platform: 'win32',
       }),
     ).toBe('D:\\claude\\settings.json');
+  });
+
+  it('finds Claude Code’s config file next to the .claude folder', () => {
+    expect(claudeConfigFile({ home: '/Users/alex', env: {}, platform: 'darwin' })).toBe(
+      '/Users/alex/.claude.json',
+    );
+    expect(claudeConfigFile({ home: 'C:\\Users\\alex', env: {}, platform: 'win32' })).toBe(
+      'C:\\Users\\alex\\.claude.json',
+    );
+    expect(
+      claudeConfigFile({
+        home: 'C:\\Users\\alex',
+        env: { CLAUDE_CONFIG_DIR: ' D:\\claude , E:\\other' },
+        platform: 'win32',
+      }),
+    ).toBe('D:\\claude\\.claude.json');
   });
 
   it('turns a picked Claude folder into its projects folder', () => {

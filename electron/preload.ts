@@ -15,6 +15,8 @@ const api: Api = {
   getMachines: () => ipcRenderer.invoke(IPC.getMachines),
   getOverview: (filters) => ipcRenderer.invoke(IPC.getOverview, filters),
   getLive: (machineIds, hours) => ipcRenderer.invoke(IPC.getLive, machineIds, hours),
+  calibrateLive: (percent) => ipcRenderer.invoke(IPC.calibrateLive, percent),
+  setLiveReference: (choice) => ipcRenderer.invoke(IPC.setLiveReference, choice),
   getProjects: (filters) => ipcRenderer.invoke(IPC.getProjects, filters),
   getProjectDetail: (project, filters, folder) =>
     ipcRenderer.invoke(IPC.getProjectDetail, project, filters, folder === true),

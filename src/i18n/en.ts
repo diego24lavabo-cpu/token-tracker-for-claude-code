@@ -278,6 +278,8 @@ export const en = {
       resetsTomorrow: (countdown: string) => `tomorrow, in ${countdown}`,
       resetsTitle:
         'Rebuilt from the times of your responses: the window starts with the first response after the previous one ended and lasts 5 hours.',
+      resetsClaudeTitle:
+        'Claude’s own reset time, as Claude Code saved it the last time it showed your usage (/usage).',
       speed: 'Speed',
       speedValue: (tokens: string) => `${tokens}/min`,
       speedHint: (cost: string, minutes: number) => `≈ ${cost}/h · last ${minutes} min`,
@@ -285,17 +287,55 @@ export const en = {
       speedTitle: 'Tokens per minute over the last 15 minutes. The cost per hour is an estimate.',
       usage: 'Estimated usage',
       usageHint: (day: string) => `of your largest window (${day}) · estimate`,
+      usageHintCalibration: (percent: string, day: string) =>
+        `calibrated at ${percent} (${day}) · estimate`,
+      usageHintClaude: (percent: string, time: string) =>
+        `from Claude’s ${percent} at ${time} · estimate`,
       usageNone: 'no finished window to compare with',
       usageTitle:
-        'An estimate, not the number Claude shows. The window’s cost at API prices, as a share of your largest finished window, which counts as 100%. Claude’s own limit is not published.',
-      limit: 'Estimated limit',
+        'An estimate. The window’s cost at API prices against the reference that counts as 100%: Claude’s own % while it is current (plus your usage since), else your calibration or your largest finished window. Claude’s own limit is not published.',
+      limit: 'Limit reached at',
+      limitAt: (time: string) => `~${time}`,
       limitIn: (duration: string) => `in ${duration} at this speed`,
-      limitAfterReset: 'After reset',
-      limitAfterResetHint: 'at this speed the window resets first',
+      limitAfterReset: 'Resets first',
+      limitAfterResetHint: 'at this speed, before the limit',
       limitReached: 'Reached',
-      limitReachedHint: 'at or above your largest window',
+      limitReachedHint: 'at or above 100% of the reference',
+      limitUnknown: 'calibrate to estimate it',
       limitTitle:
-        'An estimate, not Claude’s real limit: when the window would reach your largest finished window at the speed of the last 15 minutes.',
+        'An estimate, not Claude’s real limit: when the window would reach 100% of the reference at the speed of the last 15 minutes.',
+    },
+    reference: {
+      title: 'Estimate reference',
+      hint: 'what counts as 100%',
+      choice: 'When Claude’s % is not current',
+      largest: 'Largest window',
+      calibration: 'Calibration',
+      needsCalibration: 'Calibrate first',
+      claudeInUse: (percent: string, time: string, reset: string) =>
+        `Claude’s own number is in use: ${percent} at ${time}, until the reset at ${reset}.`,
+      claudeWaiting: (percent: string, time: string, reset: string) =>
+        `Claude’s own number: ${percent} at ${time} (reset at ${reset}). Used once a window runs on this computer.`,
+      claudeStale: (percent: string, when: string) =>
+        `Claude’s last number (${percent}, ${when}) is from an earlier window.`,
+      claudeOff: 'Reading Claude’s own % is turned off in Settings.',
+      claudeNone: 'Claude’s own % is not saved yet: run /usage in Claude Code.',
+      largestLine: (day: string, cost: string) => `Largest window: ${day} · ≈ ${cost}`,
+      noLargest: 'Largest window: none finished yet',
+      calibrationLine: (percent: string, when: string, cost: string) =>
+        `Calibration: ${percent} on ${when} · limit ≈ ${cost}`,
+      calibrationLost: (percent: string, when: string) =>
+        `Calibration: ${percent} on ${when}, its window is no longer in the history`,
+      noCalibration: 'Calibration: none yet',
+      calibrateLabel: '% shown by /usage',
+      calibrate: 'Calibrate',
+      calibrateHint:
+        'Run /usage in Claude Code and enter its “Current session” %. Limit = this window’s usage so far ÷ that %.',
+      calibrateNoWindow: 'Needs a running window with usage',
+      calibrateDemo: 'Not available in demo mode',
+      calibrated: 'Calibrated',
+      invalid: 'Enter a number above 0 and up to 100',
+      failed: 'Could not save',
     },
     idle: {
       title: 'No active window',
@@ -334,7 +374,7 @@ export const en = {
     },
     watchingOff: 'File watching is off: this page only changes when you scan again.',
     watchingSettings: 'Open Settings',
-    note: 'Estimates use API prices and your largest finished window as 100%. Claude’s own limit is per account and is not published: usage on other computers or on claude.ai is not in these logs.',
+    note: 'Estimates use API prices. 100% is Claude’s own % while it is current, else your calibration or your largest finished window. Claude’s limit is per account and is not published: usage on other computers or on claude.ai is not in these logs.',
   },
 
   calendar: {
@@ -855,6 +895,13 @@ export const en = {
       launchUnavailablePlatform: 'Not available on this system',
       fileWatching: 'Watch log files',
       fileWatchingHint: 'Refresh a few seconds after Claude Code writes',
+      claudeUsage: 'Claude’s usage %',
+      claudeUsageHint: (file: string) =>
+        `For the Live page: reads Claude Code’s 5-hour % from ${file} (saved after /usage). Nothing else from that file is kept.`,
+      claudeUsageFound: (percent: string, when: string) => `Last saved: ${percent} on ${when}`,
+      claudeUsageMissing: (file: string) => `${file} not found`,
+      claudeUsageNoData: 'No usage saved yet: run /usage in Claude Code',
+      claudeUsageUnreadable: 'The file could not be read',
       export: 'Export CSV',
       exportHint: 'For the period and machines selected above',
       exports: {

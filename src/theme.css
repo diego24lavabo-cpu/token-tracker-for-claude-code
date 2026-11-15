@@ -2975,6 +2975,7 @@ button {
 .live-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  align-items: start;
   gap: var(--space-4);
 }
 
@@ -3034,6 +3035,76 @@ button {
 .live-side-empty {
   color: var(--text-muted);
   font-size: 13px;
+}
+
+/* Reference card: what the estimates take as 100%. */
+.live-reference p,
+.live-reference-lines {
+  margin: 0;
+}
+
+.live-reference-claude {
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--border);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.live-reference-claude.is-on {
+  border-left-color: var(--accent);
+  color: var(--text);
+}
+
+.live-reference-choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.live-reference-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.live-reference-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.live-calibrate {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.live-calibrate-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.live-calibrate .text-field {
+  width: 96px;
+}
+
+.live-reference-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.live-reference-status {
+  min-height: 16px;
+  color: var(--accent-light);
+  font-size: 12px;
 }
 
 .live-active,

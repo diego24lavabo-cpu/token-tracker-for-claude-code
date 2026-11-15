@@ -865,6 +865,20 @@ function AppCard({ data, disabled }: { data: SettingsData | null; disabled: bool
             onChange={(on) => void change({ fileWatching: on }, 'watch')}
           />
         </Row>
+        <Row
+          label={a.claudeUsage}
+          hint={settings ? a.claudeUsageHint(settings.claudeUsage.file) : undefined}
+        >
+          <Switch
+            label={a.claudeUsage}
+            checked={settings?.claudeUsage.enabled ?? false}
+            disabled={disabled || !settings || busy !== null}
+            onChange={(on) => void change({ readClaudeUsage: on }, 'claude')}
+          />
+        </Row>
+        {settings && settings.claudeUsage.state !== 'off' && (
+          <p className="settings-hint">{claudeUsageState(settings.claudeUsage)}</p>
+        )}
         <Row label={a.export} hint={a.exportHint} stacked>
           <span className="export-buttons">
             {CSV_KINDS.map((kind) => (
@@ -912,6 +926,27 @@ function AppCard({ data, disabled }: { data: SettingsData | null; disabled: bool
       </div>
     </SettingsCard>
   );
+}
+
+/** What the app found the last time it read Claude Code's usage %. */
+function claudeUsageState(usage: SettingsData['app']['claudeUsage']): string {
+  const a = t.app;
+  switch (usage.state) {
+    case 'found':
+      return usage.last
+        ? a.claudeUsageFound(
+            formatPercent(usage.last.percent / 100),
+            formatDateTime(new Date(usage.last.fetchedAt).toISOString()),
+          )
+        : a.claudeUsageNoData;
+    case 'missing':
+      return a.claudeUsageMissing(usage.file);
+    case 'noData':
+      return a.claudeUsageNoData;
+    case 'unreadable':
+    case 'off':
+      return a.claudeUsageUnreadable;
+  }
 }
 
 /** Works in demo mode and without a database too: the language has its own file. */

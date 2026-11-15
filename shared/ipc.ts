@@ -6,6 +6,8 @@ export const IPC = {
   getMachines: 'machines:list',
   getOverview: 'usage:overview',
   getLive: 'usage:live',
+  calibrateLive: 'live:calibrate',
+  setLiveReference: 'live:set-reference',
   getProjects: 'usage:projects',
   getProjectDetail: 'usage:project-detail',
   getModels: 'usage:models',

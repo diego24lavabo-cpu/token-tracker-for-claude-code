@@ -282,6 +282,8 @@ export const fr: Strings = {
       resetsTomorrow: (countdown: string) => `demain, dans ${countdown}`,
       resetsTitle:
         'Reconstituée à partir des heures de vos réponses\u00a0: la fenêtre commence à la première réponse après la fin de la précédente et dure 5 heures.',
+      resetsClaudeTitle:
+        'L’heure de réinitialisation de Claude lui-même, telle que Claude Code l’a enregistrée la dernière fois qu’il a affiché votre utilisation (/usage).',
       speed: 'Vitesse',
       speedValue: (tokens: string) => `${tokens}/min`,
       speedHint: (cost: string, minutes: number) => `≈ ${cost}/h · sur ${minutes}\u202fmin`,
@@ -290,17 +292,56 @@ export const fr: Strings = {
         'Tokens par minute sur les 15 dernières minutes. Le coût par heure est une estimation.',
       usage: 'Utilisation estimée',
       usageHint: (day: string) => `de votre plus grande fenêtre (${day}) · estimation`,
+      usageHintCalibration: (percent: string, day: string) =>
+        `calibré à ${percent} (${day}) · estimation`,
+      usageHintClaude: (percent: string, time: string) =>
+        `d’après les ${percent} de Claude à ${time} · estimation`,
       usageNone: 'aucune fenêtre terminée à comparer',
       usageTitle:
-        'Une estimation, pas le chiffre affiché par Claude. Le coût de la fenêtre aux prix de l’API, en part de votre plus grande fenêtre terminée, qui vaut 100\u202f%. La limite de Claude n’est pas publiée.',
-      limit: 'Limite estimée',
+        'Une estimation. Le coût de la fenêtre aux prix de l’API, rapporté à la référence qui vaut 100\u202f%\u00a0: le % de Claude tant qu’il est à jour (plus votre utilisation depuis), sinon votre calibrage ou votre plus grande fenêtre terminée. La limite de Claude n’est pas publiée.',
+      limit: 'Limite atteinte vers',
+      limitAt: (time: string) => `~${time}`,
       limitIn: (duration: string) => `dans ${duration} à cette vitesse`,
-      limitAfterReset: 'Après la fin',
-      limitAfterResetHint: 'à cette vitesse, la fenêtre se termine avant la limite',
+      limitAfterReset: 'Remise à zéro avant',
+      limitAfterResetHint: 'à cette vitesse, avant la limite',
       limitReached: 'Atteinte',
-      limitReachedHint: 'au niveau de votre plus grande fenêtre, ou au-dessus',
+      limitReachedHint: 'à 100\u202f% de la référence ou au-delà',
+      limitUnknown: 'calibrez pour l’estimer',
       limitTitle:
-        'Une estimation, pas la vraie limite de Claude\u00a0: le moment où la fenêtre atteindrait votre plus grande fenêtre terminée, à la vitesse des 15 dernières minutes.',
+        'Une estimation, pas la vraie limite de Claude\u00a0: le moment où la fenêtre atteindrait 100\u202f% de la référence, à la vitesse des 15 dernières minutes.',
+    },
+    reference: {
+      title: 'Référence des estimations',
+      hint: 'ce qui vaut 100\u202f%',
+      choice: 'Sans % de Claude à jour',
+      largest: 'Plus grande fenêtre',
+      calibration: 'Calibrage',
+      needsCalibration: 'Calibrez d’abord',
+      claudeInUse: (percent: string, time: string, reset: string) =>
+        `Le chiffre de Claude est utilisé\u00a0: ${percent} à ${time}, jusqu’à la réinitialisation de ${reset}.`,
+      claudeWaiting: (percent: string, time: string, reset: string) =>
+        `Chiffre de Claude\u00a0: ${percent} à ${time} (réinitialisation à ${reset}). Utilisé dès qu’une fenêtre tourne sur cet ordinateur.`,
+      claudeStale: (percent: string, when: string) =>
+        `Le dernier chiffre de Claude (${percent}, ${when}) date d’une fenêtre précédente.`,
+      claudeOff: 'La lecture du % de Claude est désactivée dans les paramètres.',
+      claudeNone:
+        'Le % de Claude n’est pas encore enregistré\u00a0: lancez /usage dans Claude Code.',
+      largestLine: (day: string, cost: string) => `Plus grande fenêtre\u00a0: ${day} · ≈ ${cost}`,
+      noLargest: 'Plus grande fenêtre\u00a0: aucune terminée pour l’instant',
+      calibrationLine: (percent: string, when: string, cost: string) =>
+        `Calibrage\u00a0: ${percent} le ${when} · limite ≈ ${cost}`,
+      calibrationLost: (percent: string, when: string) =>
+        `Calibrage\u00a0: ${percent} le ${when}, sa fenêtre n’est plus dans l’historique`,
+      noCalibration: 'Calibrage\u00a0: aucun pour l’instant',
+      calibrateLabel: '% affiché par /usage',
+      calibrate: 'Calibrer',
+      calibrateHint:
+        'Lancez /usage dans Claude Code et saisissez son % «\u00a0Current session\u00a0». Limite = utilisation de cette fenêtre jusqu’ici ÷ ce %.',
+      calibrateNoWindow: 'Il faut une fenêtre en cours avec de l’utilisation',
+      calibrateDemo: 'Indisponible en mode démo',
+      calibrated: 'Calibré',
+      invalid: 'Saisissez un nombre supérieur à 0, jusqu’à 100',
+      failed: 'Enregistrement impossible',
     },
     idle: {
       title: 'Aucune fenêtre active',
@@ -340,7 +381,7 @@ export const fr: Strings = {
     watchingOff:
       'La surveillance des journaux est désactivée\u00a0: cette page ne change que si vous lancez une analyse.',
     watchingSettings: 'Ouvrir les paramètres',
-    note: 'Les estimations utilisent les prix de l’API et votre plus grande fenêtre terminée comme 100\u202f%. La limite de Claude est propre au compte et n’est pas publiée\u00a0: l’utilisation sur d’autres ordinateurs ou sur claude.ai n’est pas dans ces journaux.',
+    note: 'Les estimations utilisent les prix de l’API. 100\u202f% correspond au % de Claude tant qu’il est à jour, sinon à votre calibrage ou à votre plus grande fenêtre terminée. La limite de Claude est propre au compte et n’est pas publiée\u00a0: l’utilisation sur d’autres ordinateurs ou sur claude.ai n’est pas dans ces journaux.',
   },
 
   calendar: {
@@ -862,6 +903,14 @@ export const fr: Strings = {
       launchUnavailablePlatform: 'Non disponible sur ce système',
       fileWatching: 'Surveiller les journaux',
       fileWatchingHint: 'Actualise quelques secondes après chaque écriture de Claude Code',
+      claudeUsage: '% d’utilisation de Claude',
+      claudeUsageHint: (file: string) =>
+        `Pour la page En direct\u00a0: lit le % sur 5 heures de Claude Code dans ${file} (enregistré après /usage). Rien d’autre de ce fichier n’est conservé.`,
+      claudeUsageFound: (percent: string, when: string) =>
+        `Dernier enregistrement\u00a0: ${percent} le ${when}`,
+      claudeUsageMissing: (file: string) => `${file} introuvable`,
+      claudeUsageNoData: 'Aucune utilisation enregistrée\u00a0: lancez /usage dans Claude Code',
+      claudeUsageUnreadable: 'Le fichier n’a pas pu être lu',
       export: 'Exporter en CSV',
       exportHint: 'Pour la période et les machines sélectionnées en haut',
       exports: {

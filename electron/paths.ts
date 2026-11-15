@@ -114,6 +114,20 @@ export function claudeSettingsFile(pathEnv: PathEnv = currentEnv()): string {
 }
 
 /**
+ * Claude Code's own config file, where it caches the plan usage it last fetched: with
+ * CLAUDE_CONFIG_DIR set, `.claude.json` in the first folder it lists; otherwise
+ * `~/.claude.json` (next to the `.claude` folder, not inside it).
+ */
+export function claudeConfigFile(pathEnv: PathEnv = currentEnv()): string {
+  const p = pathFor(pathEnv.platform);
+  const configDir = (pathEnv.env.CLAUDE_CONFIG_DIR ?? '')
+    .split(',')
+    .map((dir) => dir.trim())
+    .find(Boolean);
+  return p.join(configDir ?? pathEnv.home, '.claude.json');
+}
+
+/**
  * The `projects` folder meant by a folder picked by the user: picking the Claude folder
  * itself (`~/.claude`) means its `projects` subfolder.
  */

@@ -14,6 +14,8 @@
  * the closest local measure, whereas raw tokens would be mostly cheap cache reads.
  */
 import type {
+  CalibrateResult,
+  ClaudeUsage,
   Live,
   LiveBurn,
   LiveEstimate,
@@ -22,12 +24,16 @@ import type {
   LiveMinute,
   LiveProject,
   LiveReference,
+  LiveReferenceChoice,
+  LiveReferenceInfo,
   LiveSeries,
   LiveWindow,
+  LocalDayTime,
   Pricing,
   TokenBreakdown,
 } from '../shared/types';
 import { hasAnyUsage, InvalidRequestError } from './aggregate';
+import { isFresh } from './claudeUsage';
 import type { ResponseRow, UsageDatabase } from './db';
 import { costOf } from './pricing';
 
@@ -207,24 +213,165 @@ export function largestWindow(
   return best && best.units > 0 ? best : null;
 }
 
+/** What an estimate starts from. */
+export interface EstimateBasis {
+  reference: LiveReference;
+  /** % already used before `units`: Claude's own % under `claude`, else 0. */
+  basePercent: number;
+  /** Units used on top of `basePercent`: the window's, or those since Claude's numbers. */
+  units: number;
+  /** When the window resets. */
+  resetsAt: number;
+}
+
 /**
  * Where the running window stands against a reference, and when it would reach it at the
- * current speed.
+ * current speed: % = base + units ÷ limit.
  */
 export function estimate(
-  window: UsageWindow,
-  reference: LiveReference,
+  basis: EstimateBasis,
   burn: LiveBurn,
   now: number,
-  timeOf: (ms: number) => LiveEstimate['limitAtTime'],
+  timeOf: (ms: number) => LocalDayTime,
 ): LiveEstimate {
-  const percent = (window.units / reference.units) * 100;
-  const none = { limitAt: null, limitAtTime: null };
-  if (window.units >= reference.units) return { reference, percent, outcome: 'reached', ...none };
+  const { reference, basePercent, units, resetsAt } = basis;
+  const limit = reference.units;
+  const resets = { resetsAt, resetsAtTime: timeOf(resetsAt) };
+  const none = { limitAt: null, limitAtTime: null, ...resets };
+  if (limit === null || limit <= 0) {
+    const outcome = basePercent >= 100 ? 'reached' : 'noLimit';
+    return { reference, percent: basePercent, outcome, ...none };
+  }
+  const percent = basePercent + (units / limit) * 100;
+  if (percent >= 100) return { reference, percent, outcome: 'reached', ...none };
   if (burn.unitsPerMinute <= 0) return { reference, percent, outcome: 'noRate', ...none };
-  const limitAt = now + ((reference.units - window.units) / burn.unitsPerMinute) * MINUTE_MS;
-  if (limitAt >= window.end) return { reference, percent, outcome: 'resetsFirst', ...none };
-  return { reference, percent, outcome: 'limitFirst', limitAt, limitAtTime: timeOf(limitAt) };
+  const left = (limit * (100 - percent)) / 100;
+  const limitAt = now + (left / burn.unitsPerMinute) * MINUTE_MS;
+  if (limitAt >= resetsAt) return { reference, percent, outcome: 'resetsFirst', ...none };
+  return {
+    reference,
+    percent,
+    outcome: 'limitFirst',
+    limitAt,
+    limitAtTime: timeOf(limitAt),
+    ...resets,
+  };
+}
+
+// ── Reference settings ────────────────────────────────────────────────────────
+
+const SETTING_REFERENCE = 'live_reference';
+const SETTING_CALIBRATION = 'live_calibration';
+const REFERENCE_CHOICES: readonly LiveReferenceChoice[] = ['largestWindow', 'calibration'];
+
+/** Largest window unless the user picked the calibration. */
+export function getReferenceChoice(db: UsageDatabase): LiveReferenceChoice {
+  return db.getSetting(SETTING_REFERENCE) === 'calibration' ? 'calibration' : 'largestWindow';
+}
+
+export function setReferenceChoice(db: UsageDatabase, choice: LiveReferenceChoice): void {
+  db.setSetting(SETTING_REFERENCE, choice);
+}
+
+export function parseReferenceChoice(value: unknown): LiveReferenceChoice {
+  if (!REFERENCE_CHOICES.includes(value as LiveReferenceChoice)) {
+    throw new InvalidRequestError(`the reference must be one of ${REFERENCE_CHOICES.join(', ')}`);
+  }
+  return value as LiveReferenceChoice;
+}
+
+/** A % from `/usage`: above 0, at most 100, kept to one decimal. */
+export function parseCalibrationPercent(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > 100) {
+    throw new InvalidRequestError('the percentage must be above 0 and at most 100');
+  }
+  return Math.max(0.1, Math.round(value * 10) / 10);
+}
+
+interface StoredCalibration {
+  at: number;
+  percent: number;
+}
+
+export function storedCalibration(db: UsageDatabase): StoredCalibration | null {
+  try {
+    const value: unknown = JSON.parse(db.getSetting(SETTING_CALIBRATION) ?? 'null');
+    if (typeof value !== 'object' || value === null) return null;
+    const { at, percent } = value as Record<string, unknown>;
+    if (typeof at !== 'number' || !Number.isFinite(at)) return null;
+    if (typeof percent !== 'number' || !(percent > 0 && percent <= 100)) return null;
+    return { at, percent };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Stores the % that `/usage` shows now, for the running window, and makes the calibration
+ * the reference. Refused without a running window that has priced usage.
+ */
+export function calibrate(
+  db: UsageDatabase,
+  pricing: Pricing,
+  percent: number,
+  now = Date.now(),
+): CalibrateResult {
+  const current = currentWindow(localWindows(db, pricing, now), now);
+  if (!current || current.units <= 0) return { status: 'noWindow' };
+  db.setSetting(SETTING_CALIBRATION, JSON.stringify({ at: now, percent }));
+  setReferenceChoice(db, 'calibration');
+  return { status: 'done' };
+}
+
+/** API-price units of this machine's responses from `from` to `to`, both included. */
+function unitsBetween(db: UsageDatabase, pricing: Pricing, from: number, to: number): number {
+  let units = 0;
+  if (to < from) return units;
+  for (const row of db.responsesFrom(from, to)) units += weigh(pricing, row).units;
+  return units;
+}
+
+/** A limit = the units used up to a moment ÷ the % Claude showed then. */
+function limitFrom(units: number, percent: number): number | null {
+  return units > 0 && percent > 0 ? units / (percent / 100) : null;
+}
+
+/**
+ * The limit a calibration gives: the units of its window up to the moment it was entered,
+ * at the current prices, ÷ its %. Null when no window holds that moment any more.
+ */
+function calibrationLimit(
+  db: UsageDatabase,
+  pricing: Pricing,
+  windows: readonly UsageWindow[],
+  calibration: StoredCalibration,
+): number | null {
+  const window = windows.find((item) => item.start <= calibration.at && calibration.at < item.end);
+  if (!window) return null;
+  return limitFrom(unitsBetween(db, pricing, window.start, calibration.at), calibration.percent);
+}
+
+/** Claude's own numbers, as the main process passes them to `getLive`. */
+export interface ClaudeSource {
+  /** False when the Settings switch is off: nothing was read. */
+  enabled: boolean;
+  usage: ClaudeUsage | null;
+}
+
+const NO_CLAUDE: ClaudeSource = { enabled: false, usage: null };
+
+/** Below this %, Claude's number is too coarse to derive a limit from. */
+export const MIN_CLAUDE_PERCENT = 5;
+
+function emptyReferenceInfo(): LiveReferenceInfo {
+  return {
+    choice: 'largestWindow',
+    largest: null,
+    calibration: null,
+    claudeEnabled: false,
+    claude: null,
+    canCalibrate: false,
+  };
 }
 
 // ── The page ──────────────────────────────────────────────────────────────────
@@ -263,6 +410,7 @@ export function emptyLive(hours: LiveHours, now = Date.now()): Live {
     minutes: emptyMinutes(hours, now, 0),
     active: [],
     machines: [],
+    reference: emptyReferenceInfo(),
   };
 }
 
@@ -276,7 +424,8 @@ function ranked<T>(items: readonly T[], key: (item: T) => string, value: (item: 
 /**
  * The Live page for the selected machines (all by default): the last `hours` hours of
  * this machine minute by minute, the projects in use, and each machine's 5-hour window.
- * Other machines have no response times yet (`noLiveData`).
+ * Other machines have no response times yet (`noLiveData`). `claude`: Claude Code's own
+ * numbers, read by the caller (this module never reads Claude Code's files).
  */
 export function getLive(
   db: UsageDatabase,
@@ -284,6 +433,7 @@ export function getLive(
   machineIds: string[] | undefined,
   hours: LiveHours,
   now = Date.now(),
+  claude: ClaudeSource = NO_CLAUDE,
 ): Live {
   const selected = (id: string) => !machineIds || machineIds.includes(id);
   const localSelected = selected(db.machineId);
@@ -332,6 +482,7 @@ export function getLive(
   }
   active.sort((a, b) => b.last - a.last || (a.project < b.project ? -1 : 1));
 
+  const local = localState(db, pricing, recent, now, claude);
   const machines: LiveMachine[] = db
     .listMachines()
     .filter((machine) => selected(machine.id))
@@ -354,7 +505,7 @@ export function getLive(
           estimate: null,
         };
       }
-      return { ...base, ...localState(db, pricing, recent, now) };
+      return { ...base, ...local.machine };
     });
 
   return {
@@ -365,20 +516,30 @@ export function getLive(
     minutes,
     active,
     machines,
+    reference: local.reference,
   };
 }
 
-/** This machine's window, burn rate and estimate. `recent`: its last 15 minutes of responses. */
+/**
+ * This machine's window, burn rate and estimate, and the reference card's data.
+ * `recent`: its last 15 minutes of responses; empty when it is not selected, which only
+ * changes the burn rate of a machine that is not shown.
+ */
 function localState(
   db: UsageDatabase,
   pricing: Pricing,
   recent: readonly ResponseRow[],
   now: number,
-): Omit<LiveMachine, 'machineId' | 'name' | 'platform' | 'isLocal'> {
+  claude: ClaudeSource,
+): {
+  machine: Omit<LiveMachine, 'machineId' | 'name' | 'platform' | 'isLocal'>;
+  reference: LiveReferenceInfo;
+} {
   const windows = localWindows(db, pricing, now);
   const current = currentWindow(windows, now);
   const last = windows.at(-1) ?? null;
   const previousWindow = current ? (windows.at(-2) ?? null) : last;
+  const timeOf = (ms: number) => db.localDayTime(ms);
 
   const weighed = recent.map((row) => weigh(pricing, row));
   const burn: LiveBurn = {
@@ -399,25 +560,91 @@ function localState(
     responses: window.responses,
   });
 
+  // The references.
+  const choice = getReferenceChoice(db);
+  const stored = storedCalibration(db);
+  const calibrationUnits = stored && calibrationLimit(db, pricing, windows, stored);
   const largest = largestWindow(windows, current);
-  const reference: LiveReference | null = largest && {
+  const largestReference: LiveReference | null = largest && {
     kind: 'largestWindow',
     units: largest.units,
+    at: largest.start,
+    atTime: timeOf(largest.start),
     tokens: totalOf(largest.tokens),
-    start: largest.start,
-    startAt: db.localDayTime(largest.start),
+    percent: null,
   };
+  const calibrationReference: LiveReference | null =
+    stored && calibrationUnits
+      ? {
+          kind: 'calibration',
+          units: calibrationUnits,
+          at: stored.at,
+          atTime: timeOf(stored.at),
+          tokens: null,
+          percent: stored.percent,
+        }
+      : null;
+  // The chosen one, or the largest window while the calibration gives no limit.
+  const chosen =
+    choice === 'calibration' && calibrationReference ? calibrationReference : largestReference;
+
+  const usage = claude.enabled ? claude.usage : null;
+  const fresh = usage !== null && isFresh(usage, now);
+
+  let basis: EstimateBasis | null = null;
+  if (current && usage && fresh) {
+    // Claude's own %, plus this machine's usage since. Its limit, like a calibration: this
+    // machine's units in Claude's window up to that moment ÷ that %. Only from 5% on (a
+    // rounded 1% is too coarse), and never below this machine's largest finished window:
+    // usage stops at the limit, so the limit is at least that. A smaller result means
+    // part of Claude's % came from elsewhere (another computer, claude.ai).
+    const claudeStart = usage.resetsAt - WINDOW_MS;
+    const before = unitsBetween(db, pricing, claudeStart, usage.fetchedAt);
+    const derived = usage.percent >= MIN_CLAUDE_PERCENT ? limitFrom(before, usage.percent) : null;
+    const floor = largest?.units ?? 0;
+    basis = {
+      reference: {
+        kind: 'claude',
+        units: derived !== null ? Math.max(derived, floor) : (chosen?.units ?? null),
+        at: usage.fetchedAt,
+        atTime: timeOf(usage.fetchedAt),
+        tokens: null,
+        percent: usage.percent,
+      },
+      basePercent: usage.percent,
+      units: unitsBetween(db, pricing, usage.fetchedAt + 1, now),
+      resetsAt: usage.resetsAt,
+    };
+  } else if (current && chosen) {
+    basis = { reference: chosen, basePercent: 0, units: current.units, resetsAt: current.end };
+  }
 
   return {
-    status: !last ? 'noData' : current ? 'active' : 'idle',
-    window: current && toLive(current),
-    previous: previousWindow && toLive(previousWindow),
-    lastResponse: last?.last ?? null,
-    lastResponseAt: last ? db.localDayTime(last.last) : null,
-    burn,
-    estimate:
-      current && reference
-        ? estimate(current, reference, burn, now, (ms) => db.localDayTime(ms))
-        : null,
+    machine: {
+      status: !last ? 'noData' : current ? 'active' : 'idle',
+      window: current && toLive(current),
+      previous: previousWindow && toLive(previousWindow),
+      lastResponse: last?.last ?? null,
+      lastResponseAt: last ? timeOf(last.last) : null,
+      burn,
+      estimate: basis && estimate(basis, burn, now, timeOf),
+    },
+    reference: {
+      choice,
+      largest: largest && {
+        start: largest.start,
+        startAt: timeOf(largest.start),
+        units: largest.units,
+      },
+      calibration: stored && {
+        at: stored.at,
+        atTime: timeOf(stored.at),
+        percent: stored.percent,
+        units: calibrationUnits,
+      },
+      claudeEnabled: claude.enabled,
+      claude: usage && { ...usage, fetchedAtTime: timeOf(usage.fetchedAt), fresh },
+      canCalibrate: current !== null && current.units > 0,
+    },
   };
 }
