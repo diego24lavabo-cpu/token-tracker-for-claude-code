@@ -120,6 +120,8 @@ export interface DemoWorldSize {
    * none).
    */
   liveAt?: number;
+  /** Last day of both machines' ordinary sessions, `YYYY-MM-DD` (default today). */
+  endDay?: string;
 }
 
 /**
@@ -130,13 +132,20 @@ export async function generateDemoWorld(
   env: DemoEnvironment,
   platform: Platform,
   appVersion: string,
-  { localDays = 365, otherDays = 120, liveAt }: DemoWorldSize = {},
+  { localDays = 365, otherDays = 120, liveAt, endDay }: DemoWorldSize = {},
 ): Promise<void> {
   const { local, other } = machinesFor(platform);
-  generateDemoData(env.logRoot, { days: localDays, seed: 42, paths: local.paths, liveAt });
+  generateDemoData(env.logRoot, {
+    endDay,
+    days: localDays,
+    seed: 42,
+    paths: local.paths,
+    liveAt,
+  });
 
   const otherRoot = path.join(env.root, 'logs', 'other-machine', 'projects');
   generateDemoData(otherRoot, {
+    endDay,
     days: otherDays,
     seed: 7,
     paths: other.paths,

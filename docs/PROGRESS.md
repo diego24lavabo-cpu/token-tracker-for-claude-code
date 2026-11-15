@@ -343,7 +343,7 @@ The build plan (SPEC §8) is complete.
 
 ## Release v0.1.2 (tagged 2026-11-15)
 
-CHANGELOG section `## [0.1.2] - 2026-11-15` (with the unsigned-builds line, like 0.1.1), tag `v0.1.2`, draft built by `release.yml`; the user publishes it. Contents:
+CHANGELOG section `## [0.1.2] - 2026-11-15` (with the unsigned-builds line, like 0.1.1), tag `v0.1.2`, draft built by `release.yml`; the user publishes it. The first `v0.1.2` push (on `8a033d8`) failed in its Test step, and so did CI on `main`: `tests/demo.test.ts` "shares the second computer's live data…" depended on the time of day (the ordinary demo sessions end at today 15:00 UTC or now, a few hours before `liveAt`, so after ~15:00 UTC they started a window that reset 37 minutes before `liveAt`; the app was right). Fixed with `generateDemoWorld({ endDay })`, which the test sets to two days before `liveAt`; the tag was moved to the fix. Contents:
 
 - Default prices verified on 2026-11-13 (unchanged) and new defaults for Opus 4.5 and Sonnet 4.5 (`ebf50fb`).
 - The Overview's "Estimated cost" card has a tooltip (`overview.kpi.costTitle`), and the README's cost paragraph a line: "Estimate at standard API prices. Not included: fast mode, US-only inference, web searches, Haiku long-prompt pricing."

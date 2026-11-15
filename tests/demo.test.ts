@@ -245,7 +245,15 @@ describe('demo environment', () => {
     async () => {
       const env = createDemoEnvironment('win32', tempDir());
       const liveAt = Date.now();
-      await generateDemoWorld(env, 'win32', '0.1.0', { localDays: 3, otherDays: 3, liveAt });
+      // The ordinary sessions end two days before (at least ~32 h, past the 24-hour horizon),
+      // so only the live sessions make the windows, whatever the time of day.
+      const endDay = new Date(liveAt - 2 * 86_400_000).toISOString().slice(0, 10);
+      await generateDemoWorld(env, 'win32', '0.1.0', {
+        localDays: 3,
+        otherDays: 3,
+        liveAt,
+        endDay,
+      });
 
       const db = new UsageDatabase(':memory:', { machineName: env.machineName, platform: 'win32' });
       open.push(db);
