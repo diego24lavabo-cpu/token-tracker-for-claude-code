@@ -252,7 +252,7 @@ function byTokens(a: { name: string; tokens: number }, b: { name: string; tokens
 }
 
 /** True when the database holds any usage for the selected machines, whatever the period. */
-function hasAnyUsage(db: UsageDatabase, machineIds?: string[]): boolean {
+export function hasAnyUsage(db: UsageDatabase, machineIds?: string[]): boolean {
   const where: Where = { sql: '1', params: [] };
   inList('machine_id', machineIds, where);
   return (

@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- The 5-hour usage window, rebuilt from the times of Claude Code's responses: when it started, when it resets, its tokens, the burn rate over the last 15 minutes, and an estimate against your largest past window, weighted by API prices (estimates, not Claude's own numbers). Groundwork for the coming Live page; not on screen yet.
 - French. Settings → Application → Language: System default, English or Français. The default is the system language when the app has it, else English. The switch applies at once, without a restart, to every page, the numbers and dates (`12,4 M`, `7,90 $`, `10 nov.`), the window menu and the dialogs. CSV exports keep English headers and plain numbers.
 - Default prices for Opus 4.5 and Sonnet 4.5, which can still appear in Claude Code transcripts.
 - A tooltip on the Overview's estimated cost, and a line in the README, saying what the estimate leaves out: fast mode, US-only inference, web searches and Haiku long-prompt pricing.

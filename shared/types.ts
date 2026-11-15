@@ -685,6 +685,155 @@ export interface MachinesDetail {
   moreProjects: number;
 }
 
+// ── Live ──────────────────────────────────────────────────────────────────────
+
+/** Hours of history the Live chart shows. */
+export type LiveHours = 1 | 3 | 6;
+
+/** An instant in the local time zone: `YYYY-MM-DD` and `HH:MM`. */
+export interface LocalDayTime {
+  day: string;
+  time: string;
+}
+
+/**
+ * One series of the Live chart: a project, or `project: null` for the projects left
+ * out (`projects` of them).
+ */
+export interface LiveSeries {
+  project: string | null;
+  /** All token types over the chart's hours. */
+  tokens: number;
+  projects: number;
+}
+
+/** One minute of the Live chart. */
+export interface LiveMinute {
+  /** Start of the minute, epoch milliseconds. */
+  t: number;
+  /** All token types, one value per series, in the order of `Live.series`. */
+  tokens: number[];
+}
+
+/** A project with a response in the last `ACTIVE_MINUTES` minutes. */
+export interface LiveProject {
+  project: string;
+  /** Models of its responses in the last `BURN_MINUTES` minutes, most tokens first. */
+  models: string[];
+  /** All token types in the last `BURN_MINUTES` minutes. */
+  tokens: number;
+  /** Its last response, epoch milliseconds. */
+  last: number;
+  lastAt: LocalDayTime;
+}
+
+/**
+ * A 5-hour usage window, rebuilt from response times: it starts with the first response
+ * after the previous window ended and resets 5 hours later.
+ */
+export interface LiveWindow {
+  /** Epoch milliseconds. */
+  start: number;
+  /** When the window resets: `start` + 5 hours. */
+  end: number;
+  startAt: LocalDayTime;
+  endAt: LocalDayTime;
+  tokens: TokenBreakdown;
+  /** All token types. */
+  total: number;
+  /**
+   * What the window's responses would cost at API prices, in US dollars: the unit of the
+   * estimates (each model and token type weighs its price).
+   */
+  units: number;
+  /** Tokens of models without a price, left out of `units`. */
+  unpricedTokens: number;
+  responses: number;
+}
+
+/** Usage speed over the last `minutes` minutes. */
+export interface LiveBurn {
+  minutes: number;
+  tokensPerMinute: number;
+  /** API-price units per minute (see `LiveWindow.units`). */
+  unitsPerMinute: number;
+}
+
+/**
+ * What an estimated limit is based on. `largestWindow`: the past window with the most
+ * units, taken as 100% (not the real limit).
+ */
+export interface LiveReference {
+  kind: 'largestWindow';
+  units: number;
+  /** All token types of that window. */
+  tokens: number;
+  start: number;
+  startAt: LocalDayTime;
+}
+
+/**
+ * - `resetsFirst`: at the current speed, the window resets before reaching the reference.
+ * - `limitFirst`: at the current speed, the reference is reached at `limitAt`.
+ * - `reached`: the window is already at or above the reference.
+ * - `noRate`: nothing used in the last `BURN_MINUTES` minutes.
+ */
+export type LiveOutcome = 'resetsFirst' | 'limitFirst' | 'reached' | 'noRate';
+
+/** An estimate, never Claude's own number. */
+export interface LiveEstimate {
+  reference: LiveReference;
+  /** The window's units as a share of the reference, in % (above 100 past it). */
+  percent: number;
+  outcome: LiveOutcome;
+  /** With `limitFirst`: when the reference would be reached, epoch milliseconds. */
+  limitAt: number | null;
+  limitAtTime: LocalDayTime | null;
+}
+
+/**
+ * - `active`: a window is running.
+ * - `idle`: the last window has reset; the next response starts a new one.
+ * - `noData`: no usage at all on this machine.
+ * - `noLiveData`: no response times from this machine (another computer).
+ */
+export type LiveStatus = 'active' | 'idle' | 'noData' | 'noLiveData';
+
+/** One machine's 5-hour window. */
+export interface LiveMachine {
+  machineId: string;
+  name: string;
+  platform: Platform;
+  isLocal: boolean;
+  status: LiveStatus;
+  /** The running window. Null unless `active`. */
+  window: LiveWindow | null;
+  /** The last window that has reset. Null when there is none. */
+  previous: LiveWindow | null;
+  /** The machine's last response, epoch milliseconds. */
+  lastResponse: number | null;
+  lastResponseAt: LocalDayTime | null;
+  burn: LiveBurn;
+  /** Null without a running window or without a finished window to compare with. */
+  estimate: LiveEstimate | null;
+}
+
+export interface Live {
+  /** False when the selected machines hold no usage at all. */
+  hasData: boolean;
+  /** When this was computed, epoch milliseconds. */
+  now: number;
+  hours: LiveHours;
+  /** Projects of the chart, most tokens first. */
+  series: LiveSeries[];
+  /** Every minute of the last `hours` hours, oldest first, the current minute last. */
+  minutes: LiveMinute[];
+  /** Projects in use right now, latest response first. */
+  active: LiveProject[];
+  /** The selected machines, this one first. */
+  machines: LiveMachine[];
+}
+
 // ── Sync ──────────────────────────────────────────────────────────────────────
 
 /**
@@ -867,6 +1016,8 @@ export interface Api {
   setLanguage(setting: LanguageSetting): Promise<LanguageInfo>;
   getMachines(): Promise<Machine[]>;
   getOverview(filters: Filters): Promise<Overview>;
+  /** The last `hours` hours minute by minute, and each machine's 5-hour window. */
+  getLive(machineIds: string[] | undefined, hours: LiveHours): Promise<Live>;
   getProjects(filters: Filters): Promise<Projects>;
   /** With `folder`, the whole container folder `project` (every subfolder and its top). */
   getProjectDetail(project: string, filters: Filters, folder?: boolean): Promise<ProjectDetail>;

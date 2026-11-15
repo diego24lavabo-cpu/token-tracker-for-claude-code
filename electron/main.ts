@@ -30,6 +30,7 @@ import type {
   ChooseFolderResult,
   DeleteMachineResult,
   ExportResult,
+  Live,
   LogFolder,
   Machine,
   MachinesDetail,
@@ -85,6 +86,7 @@ import {
   type DemoEnvironment,
 } from './demo';
 import { syncFolderFromPick } from './drive';
+import { emptyLive, getLive, parseLiveHours } from './live';
 import { installAppMenu } from './menu';
 import { readPreferences, writePreferences } from './preferences';
 import {
@@ -837,6 +839,12 @@ function registerIpc(): void {
   handle<Overview>(IPC.getOverview, (_event, input) => {
     const filters = parseFilters(input);
     return database ? getOverview(database, pricing, filters) : emptyOverview(filters);
+  });
+
+  handle<Live>(IPC.getLive, (_event, machinesInput, hoursInput) => {
+    const machineIds = parseMachineIds(machinesInput);
+    const hours = parseLiveHours(hoursInput);
+    return database ? getLive(database, pricing, machineIds, hours) : emptyLive(hours);
   });
 
   handle<Projects>(IPC.getProjects, (_event, input) => {

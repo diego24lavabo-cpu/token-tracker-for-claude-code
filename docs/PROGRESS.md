@@ -20,7 +20,7 @@ Status of the build plan in [SPEC.md](SPEC.md) §8. Read this first when resumin
 | 11. Packaging, release, demo   | `577d554` + `37fd22d` | `.dmg` + `.exe` config, icons, `release.yml`, demo mode, README screenshots   |
 | 12. Windows testing and fixes  | see `git log`         | Setup + portable `.exe` checked by hand, portable login and sync write fixes  |
 
-CI (lint, typecheck, tests on macOS and Windows) is green up to `487ca84` (check it for the machine deletion commit). **v0.1.1 is published** (tag on `3dbdd53`, built by `release.yml`); v0.1.0 was never published, its draft and tag are deleted.
+CI (lint, typecheck, tests on macOS and Windows) is green up to `7d9a6b6` (French); check the run of the Live stage 1 commit. **v0.1.1 is published** (tag on `3dbdd53`, built by `release.yml`); v0.1.0 was never published, its draft and tag are deleted.
 
 ## Decisions and deviations from the spec
 
@@ -204,9 +204,47 @@ CI (lint, typecheck, tests on macOS and Windows) is green up to `487ca84` (check
 - French typography in `fr.ts` is written as escapes (`\u00a0` before `:` and inside `« »`, `\u202f` before `; ? !` and units): ESLint refuses the raw characters in templates, and they are invisible.
 - CSV: `electron/csv.ts` never reads `strings` nor `format.ts`; a test exports with French on and compares with English.
 
+**Live page (in progress since 2026-11-15)**
+
+New sidebar section "Live", between Overview and Projects. The user approved a plan in 5 stages; **after each stage: tests, CHANGELOG, this file, commit, push, then stop and wait** (the user clears the context between stages). Subagents: Explore to map code if useful, one review agent at the end of a stage, never two agents editing the same files.
+
+What Claude Code exposes locally (investigated 2026-11-15, no network, credential files never opened):
+
+- Status line stdin JSON: `rate_limits.five_hour.used_percentage` (0–100) + `resets_at` (Unix seconds), same for `seven_day`; subscribers only, after the first response; never saved by Claude Code. **No status line hook for now (user's decision).**
+- `~/.claude.json` → `cachedUsageUtilization`: `{ fetchedAtMs, accountUuid, utilization: { five_hour: { utilization (%), resets_at (ISO string), limit_dollars, used_dollars, … }, seven_day: {…}, … } }`. Written only when Claude Code fetches usage (`/usage`, the VS Code usage panel), throttled. On this PC: fetched 2026-11-13 18:12 UTC (22%, reset 21:40 UTC), not refreshed the next day.
+- The limit is per **account**: that 22% window started about 16:40 UTC, but this PC's first response that day was at 19:11 UTC (the Mac or claude.ai used it). A window rebuilt from one machine's logs can differ from Claude's.
+- No limit records in this PC's transcripts.
+
+The user's decisions:
+
+1. Read `cachedUsageUtilization` from `~/.claude.json`: read-only, **that key only**, nothing else kept or logged, defensive if the format changes. A Settings switch turns it off (on by default, explained in one line). When fresh (its 5-hour `resets_at` is still in the future), its % and reset time are the reference.
+2. No status line hook.
+3. Estimates weighted by API prices (yes).
+4. Under "All": a **combined** window (all machines' responses merged, since the limit is per account) is the main line, with the per-machine windows below.
+5. `live.json` written every minute while active, **only while sync is on**.
+
+Stages:
+
+1. **Done** (this commit): the calculation and `getLive` for this machine.
+2. **Next.** The Live page: sidebar item between Overview and Projects (the Ctrl/Cmd+digit shortcuts follow sidebar order: Live becomes 2, Settings 9), route, header (machine selector applies; period selector greyed with a reason, like the Calendar's `periodIgnored`), KPI row (window tokens + start time · resets at + countdown · burn rate · estimated % · estimated time to limit), per-minute stacked bars colored by project with a 1 h | 3 h | 6 h switch (marks: window start, now), "Active now" list (project, models, tokens of the last 15 min), idle state ("No active window", last window), every estimate labeled as such, notice when file watching is off. Refresh: `usageUpdated` (watcher: 2 s debounce, 10 s max), plus a refetch every minute and a 1 s countdown tick. English + French strings. Demo data: add a session running "now" so the demo shows a live window (`scripts/demo-data.mjs` / `electron/demo.ts`). Check over CDP in demo mode at 1100, 1440 and 1920 px.
+3. Calibration and reference: enter the % shown by `/usage` (limit = window units at that moment ÷ %), the reference choice (largest window / calibration), `cachedUsageUtilization` reader + Settings switch (decision 1); the reference becomes `kind: 'largestWindow' | 'calibration' | 'claude'`.
+4. `machines/<id>/live.json` sync (window start/reset + per-minute buckets of the last 6 h by project and model, token counts only; written at most once a minute while active and sync is on; read by the existing 30 s poll; stale → "no live data since HH:MM"; older app → "needs 0.1.2 or later"), the combined window under "All" (decision 4), README + Drive `README.txt` (`README_VERSION` 3). Sync tests: two machines, broken / stale / missing file, conflict copy.
+5. README section, final CHANGELOG and docs.
+
+Stage 1 as built (`electron/live.ts`, `tests/live.test.ts`):
+
+- Window rule (`addToWindows`, `chainWindows`): responses in time order; a response joins the last window while `ts < end`, else starts a new one with `end = ts + 5 h`. So a response at the exact reset starts the next window, and the next window starts at the first response after the reset, not at the reset. Every response counts: main sessions, subagents, `/btw`, warm-ups (all are API calls). Claude starts the window with the prompt a few seconds earlier; the logs only have response times.
+- Units: `weigh` prices each response with `costOf` (model, token type, 1-hour cache). A model without a price weighs 0 and its tokens go to `unpriced` / `LiveWindow.unpricedTokens`.
+- `WindowHistory` (one per database, `WeakMap`) keeps every window of this machine's history up to `now`. Each call re-reads only the responses from the start of the last window to `now`; it re-reads everything when the pricing object changes (main.ts replaces it on save), when `db.fullRefreshes` changes (incremented by each full derived-table rebuild: Rebuild database, large imports, container or alias changes), when `db.responsesBefore(tail.start)` differs from the cached count, when an older response's tokens grew in place (`db.takeEarliestUpgrade()`: the earliest `ts` upgraded by dedup since the last call, recorded in `storeMessage` when a later copy of a streamed response has larger counts; found by the stage review), or when `now` goes back. Responses dated after `now` (clock set ahead) are left out until their time, so they never hide the running window. On the real database (2,071 responses, 23 windows): 1.7 ms cold, 0.2 ms warm, `getLive(6 h)` 1.3 ms.
+- Window starts are exact response times, not rounded to the hour like ccusage does: the one real reset time seen (`cachedUsageUtilization`, 21:39:59.88 UTC) is not on the hour.
+- `getLive(db, pricing, machineIds, hours, now)` (`Live` in `shared/types.ts`, IPC `usage:live`, `parseLiveHours` accepts 1, 3, 6): `minutes` = every minute of the last `hours` hours (current minute last, `t` = minute start in epoch ms, one value per series); `series` = projects by tokens over the chart, at most 6 (`LIVE_SERIES`), past that 5 + one merged series with `project: null`; `active` = projects with a response in the last 5 minutes, with models and tokens of the last 15 minutes, latest first; `machines` = the selected machines (this one first): `status` (`active` / `idle` / `noData` / `noLiveData` for other machines until stage 4), `window` (running), `previous` (the last window that has reset), `lastResponse`, `burn` (tokens and units of the last 15 minutes ÷ 15, a response exactly 15 minutes old left out), `estimate` against the largest finished window (`largestWindow`: most units, latest on a tie, the running one left out; null without one): `percent`, `outcome` (`limitFirst` + `limitAt` / `resetsFirst` / `reached` / `noRate`). Times are UTC milliseconds plus `LocalDayTime` labels from `db.localDayTime`.
+- `db.ts`: `responsesFrom(from, to)` (iterated), `responsesBetween` (with the project through `tt_project`), `responsesBefore`, `fullRefreshes`, `takeEarliestUpgrade`. The project namer behind `tt_project` is now also set when the database opens (it was only set at each refresh), so `responsesBetween` names projects right before the first scan.
+- Real data check (snapshot of the installed app's database by `VACUUM INTO`): current window 23:42 → 04:42 local, 39.4M tokens, $18.64 at API prices, 38% of the largest window (Nov 12, $48.94). The Nov 13 window on this PC starts 19:11 UTC, not ~16:40 as Claude's cache said: expected, see "per account" above.
+
 **Database**
 
-- Schema version 6. Versions 2 and 3 empty the `files` table so the transcripts still on disk are read again to fill the new columns. Version 4 adds `session_projects` and rebuilds the derived tables from `messages` (checked on a real version-3 database). Version 5 only rebuilds the derived tables, for the `<folder> › <subfolder>` names (checked on a version-4 database with a flagged folder). Version 6 adds `session_days`, `session_models`, `subagent_models`, `remote_files`, `machines.hidden`, `machines.app_version`, and rebuilds the derived tables. The dev database was migrated 5 → 6 by a dev run during step 10; a snapshot of it in the built app gives Overview total = sum of `hourly`, and the sessions' costs add up to the Overview cost exactly.
+- Schema version 7: version 7 only adds the index `messages_ts` (no rebuild). A dev run (`npm run dev`) migrates the dev database to 7; the installed 0.1.1 app has its own database and is not affected.
+- Versions 2 and 3 empty the `files` table so the transcripts still on disk are read again to fill the new columns. Version 4 adds `session_projects` and rebuilds the derived tables from `messages` (checked on a real version-3 database). Version 5 only rebuilds the derived tables, for the `<folder> › <subfolder>` names (checked on a version-4 database with a flagged folder). Version 6 adds `session_days`, `session_models`, `subagent_models`, `remote_files`, `machines.hidden`, `machines.app_version`, and rebuilds the derived tables. The dev database was migrated 5 → 6 by a dev run during step 10; a snapshot of it in the built app gives Overview total = sum of `hourly`, and the sessions' costs add up to the Overview cost exactly.
 
 **Windows testing (step 12, 2026-11-13)**
 
@@ -257,6 +295,8 @@ On `main`, in CHANGELOG's Unreleased section, no tag yet (the user decides when)
 - Settings → Sync: Delete a machine permanently (local database, then optionally its Drive folder + `deleted.json` so every computer deletes it), Hide replaces Remove, and every machine shows its last sync date (see "Deleting a machine" above). Tests in `tests/sync.test.ts` ("deleting a machine", "deleted.json") and `tests/format.test.ts`. The README's sync section and the Drive `README.txt` text explain it. `README.txt` now carries a version line (`README_VERSION` = 2 in `syncFormat.ts`, bump it with every text change): `writeReadme` rewrites a README without one or with a lower one at each write, never a higher one (test "rewrites an outdated README"). To check by hand: delete the old dev PC or a fake machine, with and without the Drive step, and watch it disappear on the Mac.
 
 - French UI and the language setting (see "Languages" above). To check by hand on the Mac: the menu bar in French after a switch, and `System default` on a French macOS.
+
+- The Live page, in progress (see "Live page" above): stage 1 of 5 done. Release only once the user asks; they said "no release" for this work.
 
 To release: turn Unreleased into `## [0.1.2] - <day>` with its link reference (`[0.1.2]: …/releases/tag/v0.1.2`, Unreleased compares `v0.1.2...HEAD`), bump the version (`npm version 0.1.2 --no-git-tag-version`), push `main`, tag `v0.1.2`, check the draft, publish.
 

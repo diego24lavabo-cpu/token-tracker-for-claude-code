@@ -5,6 +5,7 @@ export const IPC = {
   setLanguage: 'app:set-language',
   getMachines: 'machines:list',
   getOverview: 'usage:overview',
+  getLive: 'usage:live',
   getProjects: 'usage:projects',
   getProjectDetail: 'usage:project-detail',
   getModels: 'usage:models',

@@ -285,6 +285,10 @@ export const MIGRATIONS: ReadonlyArray<(db: Sqlite) => void> = [
         ON CONFLICT (key) DO UPDATE SET value = '1';
     `);
   },
+  // The Live page reads responses by time: the last hours and the 5-hour windows.
+  (db) => {
+    db.exec('CREATE INDEX messages_ts ON messages (ts);');
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -361,6 +365,10 @@ function activeTime(partition: string): string {
  * or the aliases only rebuilds the derived tables.
  */
 const PROJECT_NAME = 'tt_project(project, subfolder)';
+
+/** The columns of a `ResponseRow`. */
+const RESPONSE_COLUMNS = `ts, model, input, output, cache_write AS cacheWrite,
+  cache_read AS cacheRead, cache_write_1h AS cacheWrite1h`;
 
 /** The columns of 'messages' plus the reported project, for the 'scoped' CTEs below. */
 const SCOPED_COLUMNS = `*, ${PROJECT_NAME} AS project_name`;
@@ -617,6 +625,23 @@ export interface DatabaseStats {
   skippedLines: number;
 }
 
+/** One response of this machine, for the Live page. */
+export interface ResponseRow {
+  /** Epoch milliseconds. */
+  ts: number;
+  model: string;
+  input: number;
+  output: number;
+  cacheWrite: number;
+  cacheRead: number;
+  cacheWrite1h: number;
+}
+
+/** A response with the project it is reported under (container folders and aliases applied). */
+export interface ProjectResponseRow extends ResponseRow {
+  project: string;
+}
+
 export interface SubagentRow {
   sessionId: string;
   agentId: string;
@@ -722,6 +747,7 @@ export interface RemoteFile {
 
 interface ExistingMessage {
   id: number;
+  ts: number;
   local_day: string;
   local_hour: number;
   session_id: string;
@@ -876,13 +902,15 @@ export class UsageDatabase {
   readonly machineId: string;
 
   private readonly clock: LocalClock;
-  /** Behind `tt_project`; set from the stored flags and aliases before each refresh. */
+  /** Behind `tt_project`; set from the stored flags and aliases on open and at each refresh. */
   private nameProject = projectNamer([], new Map());
 
   private readonly touchedBuckets = new Set<string>();
   private readonly touchedSessions = new Set<string>();
   private readonly touchedAgents = new Map<string, Set<string>>();
   private rebuildAll = false;
+  private fullRefreshCount = 0;
+  private earliestUpgrade: number | null = null;
 
   private readonly statements: ReturnType<typeof prepareStatements>;
 
@@ -912,6 +940,8 @@ export class UsageDatabase {
       );
 
       this.statements = prepareStatements(this.raw);
+      // Every change of the flags or aliases refreshes the derived tables, which sets it again.
+      this.nameProject = this.currentProjectNamer();
       this.machineId = this.ensureLocalMachine(options);
       this.applyTimeZone();
 
@@ -1704,6 +1734,14 @@ export class UsageDatabase {
       this.touch(existing.local_day, existing.local_hour, message.sessionId, message.agentId);
     }
     if (moreComplete) {
+      const tokensGrew =
+        input !== existing.input ||
+        output !== existing.output ||
+        cacheWrite !== existing.cache_write ||
+        cacheRead !== existing.cache_read ||
+        cacheWrite1h !== existing.cache_write_1h;
+      if (tokensGrew)
+        this.earliestUpgrade = Math.min(this.earliestUpgrade ?? existing.ts, existing.ts);
       this.statements.completeMessage.run({
         id: existing.id,
         input,
@@ -1761,10 +1799,8 @@ export class UsageDatabase {
       this.touchedBuckets.size + this.touchedSessions.size + agentCount > FULL_REBUILD_THRESHOLD;
 
     const machine = this.machineId;
-    this.nameProject = projectNamer(
-      this.getContainerProjects(),
-      aliasMap(this.getProjectAliases()),
-    );
+    this.nameProject = this.currentProjectNamer();
+    if (full) this.fullRefreshCount += 1;
     this.raw.transaction(() => {
       if (!full) this.fillTouchedTables();
       const scope = full ? EVERYTHING : TOUCHED;
@@ -1776,6 +1812,19 @@ export class UsageDatabase {
     this.touchedSessions.clear();
     this.touchedAgents.clear();
     this.rebuildAll = false;
+  }
+
+  /**
+   * How many times every derived row was rebuilt since the database was opened (a
+   * rebuild, a large import, a change of flags or aliases). Caches built from `messages`
+   * start again when it changes.
+   */
+  get fullRefreshes(): number {
+    return this.fullRefreshCount;
+  }
+
+  private currentProjectNamer(): typeof this.nameProject {
+    return projectNamer(this.getContainerProjects(), aliasMap(this.getProjectAliases()));
   }
 
   private fillTouchedTables(): void {
@@ -1850,6 +1899,45 @@ export class UsageDatabase {
       subagentFiles: files.subagent_files,
       skippedLines: files.skipped,
     };
+  }
+
+  /**
+   * This machine's responses from `from` to `to` (epoch milliseconds, both inclusive),
+   * oldest first. Iterated, so a long history is never held at once.
+   */
+  responsesFrom(from: number, to: number): IterableIterator<ResponseRow> {
+    return this.raw
+      .prepare(`SELECT ${RESPONSE_COLUMNS} FROM messages WHERE ts >= ? AND ts <= ? ORDER BY ts, id`)
+      .iterate(from, to) as IterableIterator<ResponseRow>;
+  }
+
+  /**
+   * The earliest time (epoch milliseconds) of a stored response whose token counts grew
+   * since the last call (a later, more complete copy of a streamed response), or null.
+   * Each call starts over: its one caller is the Live page's window cache.
+   */
+  takeEarliestUpgrade(): number | null {
+    const earliest = this.earliestUpgrade;
+    this.earliestUpgrade = null;
+    return earliest;
+  }
+
+  /** This machine's responses from `from` to `to` (both inclusive), oldest first, with their project. */
+  responsesBetween(from: number, to: number): ProjectResponseRow[] {
+    return this.raw
+      .prepare(
+        `SELECT ${RESPONSE_COLUMNS}, ${PROJECT_NAME} AS project
+         FROM messages WHERE ts >= ? AND ts <= ? ORDER BY ts, id`,
+      )
+      .all(from, to) as ProjectResponseRow[];
+  }
+
+  /** How many of this machine's responses are older than `before`. */
+  responsesBefore(before: number): number {
+    return this.raw
+      .prepare('SELECT COUNT(*) FROM messages WHERE ts < ?')
+      .pluck()
+      .get(before) as number;
   }
 
   /** The subagent invocations of this machine, oldest first. */
@@ -1930,7 +2018,7 @@ function prepareStatements(db: Sqlite) {
            description = excluded.description, tool_use_id = excluded.tool_use_id`,
     ),
     getMessage: db.prepare(
-      `SELECT id, local_day, local_hour, session_id, agent_id,
+      `SELECT id, ts, local_day, local_hour, session_id, agent_id,
                 input, output, cache_write, cache_read, cache_write_1h, subfolder,
                 stop_reason, rank
          FROM messages WHERE dedup_key = ?`,

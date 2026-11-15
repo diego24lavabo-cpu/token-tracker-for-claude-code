@@ -14,6 +14,7 @@ const api: Api = {
   setLanguage: (setting) => ipcRenderer.invoke(IPC.setLanguage, setting),
   getMachines: () => ipcRenderer.invoke(IPC.getMachines),
   getOverview: (filters) => ipcRenderer.invoke(IPC.getOverview, filters),
+  getLive: (machineIds, hours) => ipcRenderer.invoke(IPC.getLive, machineIds, hours),
   getProjects: (filters) => ipcRenderer.invoke(IPC.getProjects, filters),
   getProjectDetail: (project, filters, folder) =>
     ipcRenderer.invoke(IPC.getProjectDetail, project, filters, folder === true),
