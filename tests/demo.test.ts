@@ -275,7 +275,10 @@ describe('demo environment', () => {
       expect(live.combined!.window!.start).toBeLessThanOrEqual(liveAt - 230 * 60_000);
       expect(live.combined!.window!.start).toBeLessThanOrEqual(local!.window!.start);
       expect(live.combined!.window!.total).toBeGreaterThan(local!.window!.total);
-      expect(live.reference.scope).toEqual({ counted: ['MacBook Pro'], others: 1 });
+      expect(live.reference.scope).toEqual({
+        counted: [{ name: 'MacBook Pro', liveAtTime: null }],
+        others: 1,
+      });
       removeDemoEnvironment(env);
     },
     SLOW_TEST_MS,

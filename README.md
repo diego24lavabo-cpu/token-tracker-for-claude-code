@@ -13,6 +13,7 @@ Everything runs locally. No account, no API key, no telemetry, no network calls.
 ## Features
 
 - **Overview** with the essentials: total, input and output tokens, estimated cost, tokens per day.
+- **Live**: where you stand in Claude's 5-hour usage window right now, with the reset time, your speed, an estimated % and when the limit would be reached at this speed.
 - **Projects**: usage per project, with a detailed analysis panel.
 - **Models**: share, cache hit rate and estimated cost per model.
 - **Calendar**: 12-month heatmap, streaks, usage by weekday, hour and month.
@@ -22,6 +23,8 @@ Everything runs locally. No account, no API key, no telemetry, no network calls.
 - **Permanent history**: the app keeps its own local database, so your history survives Claude Code's transcript cleanup.
 - **CSV export** and an editable price table for the cost estimate.
 - **English or French**, switched in Settings without a restart (by default, the system language).
+
+![Live page: the 5-hour window of two computers together, tokens per minute by project, and the estimate reference](docs/screenshots/live.png)
 
 | Projects                                                                     | Calendar                                                                                    |
 | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
@@ -76,6 +79,21 @@ Only the usage numbers of each response are read (token counts, model, timestamp
 - **Cost is an estimate at standard API prices.** Each model's tokens are multiplied by the prices in an editable `pricing.json` in the app's data folder; writes to the 1-hour cache are priced at their own, higher rate. Not included: fast mode, US-only inference, web searches and Haiku long-prompt pricing. On a subscription this is only what the same usage would cost if billed per token. A model without a price shows no cost.
 - **History is permanent.** Claude Code deletes old transcripts (after 30 days by default). The app copies the usage numbers into its own database and never removes them when a source file disappears.
 
+## The Live page
+
+Claude's usage limit resets 5 hours after the window starts. The Live page rebuilds that window from the times of your Claude Code responses: a window starts with the first response after the previous one ended and lasts 5 hours.
+
+- **Top row**: the window's tokens since it started, the reset time with a countdown, your speed over the last 15 minutes, the estimated usage and the time you would reach the limit at this speed ("Limit reached at ~14:05", or "Resets first").
+- **Chart**: tokens per minute by project over the last 1, 3 or 6 hours, with marks for the window start and now. Next to it, the projects in use right now and, with several computers, each one's window.
+- It refreshes a few seconds after Claude Code writes a transcript (unless file watching is off in Settings) and every minute.
+
+Anthropic does not publish the limits, so the % is an **estimate**, in API-price units (each response weighs what it would cost at API prices, so cheap cache reads count less). What counts as 100%:
+
+1. **Claude's own %**, while it is current. Claude Code saves the 5-hour % and reset time in `~/.claude.json` when it shows your usage (`/usage`, or the usage panel in the IDE). The app reads only those numbers, never writes the file, and you can turn this off in Settings → Application → Claude's usage %. The page then adds the usage since that moment.
+2. Otherwise your choice on the Live page: your **largest finished window**, or a **calibration**. To calibrate, run `/usage` in Claude Code and enter its "Current session" % on the Live page; the limit becomes the window's usage so far divided by that %, and it carries over to later windows.
+
+With several computers and sync on, the limit is per account, so under **All** the top of the page is every computer together: one window that starts with the first response on any of them. Another computer's usage stays in that window until the window resets, even after its app is closed: when its live data is more than 15 minutes old the page says since when ("MacBook (last data at 10:00)"). Usage on claude.ai, or on a computer that does not share live data, is not in these logs and is not counted.
+
 ## How sync works
 
 Sync is **off by default**. When you turn it on in Settings, the app writes small JSON files into a `ClaudeTokenTracker` folder inside your local **Google Drive for desktop** folder ("My Drive", in any language), and reads the files written by your other machines. There is no Google API, no OAuth and no server: the Drive client on your computer does the transfer. With several Google accounts, or none found, you choose the folder.
@@ -87,7 +105,7 @@ Each machine writes only its own folder, `ClaudeTokenTracker/machines/<random id
 - in `live.json`, the last 6 hours minute by minute (response times, project, model, token counts), when the machine was in use over the last 24 hours, and its current and previous 5-hour windows
 - your machine's name and platform
 
-`live.json` is rewritten at most once a minute while you use Claude Code, and every 5 minutes while the app runs, so the other computers can tell an idle machine from one whose app is closed. Claude's 5-hour limit is per account, so the Live page adds up every computer whose live data is less than 15 minutes old; older live data is left out of the estimate and the page says so. A computer needs version 0.1.2 or later to share live data.
+`live.json` is rewritten at most once a minute while you use Claude Code, and every 5 minutes while the app runs, so the other computers can tell an idle machine from one whose app is closed. Claude's 5-hour limit is per account, so the Live page adds up every computer's live data in the running window. Live data more than 15 minutes old still counts until its window resets, and the page shows when it was written. A computer needs version 0.1.2 or later to share live data.
 
 What is **never** written: prompts, responses, code, file paths, subagent task descriptions.
 
@@ -99,6 +117,7 @@ To get rid of an old computer, use Settings → Sync → Machines, which shows e
 
 - The app makes no network calls.
 - Your usage database stays in the app's user data folder on your computer.
+- For the Live page, the app reads the 5-hour % and reset time that Claude Code saves in `~/.claude.json`, and nothing else from that file (turn it off in Settings → Application). It never writes the file, and these numbers are not synced.
 - The only data that leaves the machine is the aggregated sync files described above, and only if you enable sync.
 - Cost figures are an estimate "at API prices" from an editable price table. For subscription users it is only an equivalent.
 

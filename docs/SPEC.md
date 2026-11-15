@@ -395,7 +395,7 @@ ClaudeTokenTracker/
 - Watch `machines/*/` with chokidar in polling mode (**30 s interval**), because Drive folders on Windows sometimes miss native events.
 - Ignore broken or partial JSON (Drive may still be downloading). Keep the last good version and retry later.
 - Ignore Drive conflict copies (`2026 (1).json`, `live (1).json` etc.) and log them.
-- Other machines' `live.json` are kept in memory only (last good copy). Written more than 15 minutes ago → stale: "no live data since HH:MM", left out of the estimate. No `live.json` and an app older than 0.1.2 → "needs version 0.1.2 or later".
+- Other machines' `live.json` are kept in memory only (last good copy). Written more than 15 minutes ago → stale. Usage does not expire: stale live data stays in the combined window and the estimate until that window resets (the wording says "last data at HH:MM"); after the reset the machine reads "no live data since HH:MM". No `live.json` and an app older than 0.1.2 → "needs version 0.1.2 or later".
 - Merge = add all machines' records together. They never overlap, because each machine exports only its own logs.
 - **Projects with the same name on both machines are merged**, with a per-machine breakdown. Settings → "Project aliases" maps different names to one project.
 - The local machine's data always comes from its own database. Only other machines' data comes from Drive (stored in a separate table, replaced on each read).

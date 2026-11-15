@@ -66,8 +66,8 @@ export function Live() {
     return () => clearInterval(timer);
   }, []);
 
-  // The top of the page: every computer together under "All" while their live data is
-  // fresh, else this computer or the one picked in the header.
+  // The top of the page: every computer together under "All" while other computers' live
+  // data is chained in, else this computer or the one picked in the header.
   const line = data ? topLine(data, machineId === ALL_MACHINES) : null;
   const estimate = data?.estimate ?? null;
   // Claude's own reset time when its % is in use, else the rebuilt window's.
@@ -144,6 +144,8 @@ interface TopLine {
   name: string | null;
   /** Another computer: when its live data was written. */
   liveAtTime: LocalDayTime | null;
+  /** Another computer whose live data is older than 15 minutes (its window still runs). */
+  stale: boolean;
   /** How many computers it counts. */
   computers: number;
 }
@@ -154,6 +156,7 @@ function topLine(data: LiveData, all: boolean): TopLine | null {
       ...data.combined,
       name: null,
       liveAtTime: null,
+      stale: false,
       computers: data.combined.machines.length,
     };
   }
@@ -179,9 +182,12 @@ function KpiRow({
   // Without an estimate: no reference to compare with, or no account window running.
   const missing = accountRunning ? t.kpi.usageNone : t.kpi.usageNoWindow;
   const now = useNow();
+  const today = useToday();
   const current = line?.window ?? null;
   const k = t.kpi;
   const all = line !== null && line.computers > 1;
+  // Another computer whose live data is not fresh: when it was written.
+  const staleAt = line?.stale && line.liveAtTime ? when(line.liveAtTime, today) : null;
 
   return (
     <div className="kpi-grid kpi-grid--5">
@@ -192,7 +198,9 @@ function KpiRow({
           hint={
             all
               ? k.windowHintAll(current.startAt.time, line.computers, formatCost(costOf(current)))
-              : k.windowHint(current.startAt.time, formatCost(costOf(current)))
+              : staleAt
+                ? k.windowHintStale(current.startAt.time, staleAt, formatCost(costOf(current)))
+                : k.windowHint(current.startAt.time, formatCost(costOf(current)))
           }
           title={all ? k.windowTitleAll : k.windowTitle}
         />
@@ -545,6 +553,7 @@ function largestLine(info: LiveReferenceInfo): string {
  */
 function ReferenceCard({ info, demo }: { info: LiveReferenceInfo; demo: boolean }) {
   const r = t.reference;
+  const today = useToday();
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatusText] = useState<string | null>(null);
@@ -589,12 +598,21 @@ function ReferenceCard({ info, demo }: { info: LiveReferenceInfo; demo: boolean 
     calibration && info.scope.others > 0
       ? `${calibrationText} · ${calibration.computers > 1 ? r.computers(calibration.computers) : r.calibrationLocal}`
       : calibrationText;
+  // The other computers counted; one whose live data is not fresh says since when.
+  const counted = info.scope.counted;
+  const names = counted
+    .map((other) =>
+      other.liveAtTime ? r.scopeLastData(other.name, when(other.liveAtTime, today)) : other.name,
+    )
+    .join(', ');
   const scopeLine =
     info.scope.others === 0
       ? null
-      : info.scope.counted.length > 0
-        ? r.scopeAll(info.scope.counted.join(', '))
-        : r.scopeLocal;
+      : counted.length === 0
+        ? r.scopeLocal
+        : counted.some((other) => other.liveAtTime)
+          ? r.scopeKept(names)
+          : r.scopeAll(names);
 
   const options: SegmentedOption<LiveReferenceChoice>[] = [
     { value: 'largestWindow', label: r.largest },
@@ -709,7 +727,10 @@ function MachinesCard({ machines }: { machines: LiveMachine[] }) {
   const status = (machine: LiveMachine) => {
     switch (machine.status) {
       case 'active':
-        return machine.window ? m.active(machine.window.endAt.time) : m.idle;
+        if (!machine.window) return m.idle;
+        return machine.stale && machine.liveAtTime
+          ? m.activeStale(machine.window.endAt.time, when(machine.liveAtTime, today))
+          : m.active(machine.window.endAt.time);
       case 'noLiveData':
         return m.noLive;
       case 'needsUpdate':

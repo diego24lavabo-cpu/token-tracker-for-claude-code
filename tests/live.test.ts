@@ -1190,7 +1190,10 @@ describe('other computers', () => {
       10,
     );
     expect(live.estimate?.resetsAt).toBe(NOW + 2 * HOUR);
-    expect(live.reference.scope).toEqual({ counted: ['MacBook'], others: 1 });
+    expect(live.reference.scope).toEqual({
+      counted: [{ name: 'MacBook', liveAtTime: null }],
+      others: 1,
+    });
     expect(live.reference.canCalibrate).toBe(true);
   });
 
@@ -1218,31 +1221,91 @@ describe('other computers', () => {
     expect(mac.estimate).toEqual(all.estimate);
   });
 
-  it('leaves stale live data out of the window and the estimate, not out of the chart', async () => {
+  it('keeps stale live data in the window and the estimate, saying when it was written', async () => {
     const writtenAt = NOW - LIVE_FRESH_MS - 1_000;
     const { db, file } = await withMac(LOCAL, MAC, { writtenAt });
     const live = getLive(db, PRICING, undefined, 6, NOW, undefined, [file]);
+    const lastData = { day: '2026-11-10', time: '11:45' };
 
-    expect(live.combined).toBeNull();
+    // Usage does not expire: the Mac's part up to its last write still counts.
+    const before = 2 * opusUnits(DEFAULT_USAGE) + sonnet;
+    expect(live.combined?.window).toMatchObject({ start: NOW - 3 * HOUR, end: NOW + 2 * HOUR });
+    expect(live.combined?.window?.units).toBeCloseTo(localUnits + before, 15);
     expect(live.machines[1]).toMatchObject({
-      status: 'stale',
-      window: null,
+      status: 'active',
+      stale: true,
       liveAt: writtenAt,
-      liveAtTime: { day: '2026-11-10', time: '11:45' },
+      liveAtTime: lastData,
     });
-    expect(live.estimate?.resetsAt).toBe(NOW + 3 * HOUR);
-    expect(live.estimate?.percent).toBeCloseTo((localUnits / opusUnits(big)) * 100, 10);
-    expect(live.reference.scope).toEqual({ counted: [], others: 1 });
-    // What the Mac did up to its last write is still on the chart.
+    expect(live.machines[1]?.window?.start).toBe(NOW - 3 * HOUR);
+    expect(live.estimate?.resetsAt).toBe(NOW + 2 * HOUR);
+    expect(live.estimate?.percent).toBeCloseTo(((localUnits + before) / opusUnits(big)) * 100, 10);
+    expect(live.reference.scope).toEqual({
+      counted: [{ name: 'MacBook', liveAtTime: lastData }],
+      others: 1,
+    });
     expect(live.series.map((series) => [series.project, series.tokens])).toEqual([
       ['demo-app', 460],
       ['api', 230],
     ]);
     // Written exactly 15 minutes ago: still fresh.
     const edge = await withMac(LOCAL, MAC, { writtenAt: NOW - LIVE_FRESH_MS });
-    expect(
-      getLive(edge.db, PRICING, undefined, 6, NOW, undefined, [edge.file]).combined,
-    ).not.toBeNull();
+    const fresh = getLive(edge.db, PRICING, undefined, 6, NOW, undefined, [edge.file]);
+    expect(fresh.reference.scope.counted).toEqual([{ name: 'MacBook', liveAtTime: null }]);
+    expect(fresh.machines[1]?.stale).toBe(false);
+  });
+
+  it('keeps a computer that went quiet in the window it started, until that window resets', async () => {
+    // The Mac from 09:00 to 10:00, then its app closed: its last live data is from 10:00.
+    // This computer from 10:20 on, and again at 14:10.
+    const at = (time: string) => Date.parse(`2026-11-10T${time}Z`);
+    const local: Response[] = [
+      { at: NOW - 24 * HOUR, u: big, session: SESSION_C },
+      { at: at('10:20:00') },
+      { at: at('11:50:00') },
+      { at: at('14:10:00') },
+    ];
+    const mac: Response[] = [
+      { at: at('09:00:00'), project: 'api' },
+      { at: at('09:30:00'), project: 'api' },
+      { at: at('10:00:00'), project: 'api' },
+    ];
+    const { db, macId, file } = await withMac(local, mac, { writtenAt: at('10:00:20') });
+    const lastData = { day: '2026-11-10', time: '10:00' };
+    const five = 5 * opusUnits(DEFAULT_USAGE);
+
+    // At 12:00 the account's window is the one the Mac started at 09:00, not this
+    // computer's (10:20 to 15:20), and it counts the Mac's usage.
+    const noon = getLive(db, PRICING, undefined, 6, NOW, undefined, [file]);
+    expect(noon.combined?.window).toMatchObject({
+      start: at('09:00:00'),
+      end: at('14:00:00'),
+      responses: 5,
+    });
+    expect(noon.combined?.window?.units).toBeCloseTo(five, 15);
+    expect(noon.combined?.machines.map((machine) => machine.machineId)).toEqual([
+      db.machineId,
+      macId,
+    ]);
+    expect(noon.machines[0]?.window?.start).toBe(at('10:20:00'));
+    expect(noon.machines[1]).toMatchObject({ status: 'active', stale: true, liveAtTime: lastData });
+    expect(noon.estimate?.resetsAt).toBe(at('14:00:00'));
+    expect(noon.estimate?.percent).toBeCloseTo((five / opusUnits(big)) * 100, 10);
+    expect(noon.reference.scope.counted).toEqual([{ name: 'MacBook', liveAtTime: lastData }]);
+
+    // At 14:30 that window has reset: the Mac no longer counts, and the next window starts
+    // with this computer's response at 14:10 (not 10:20 + 5 h).
+    const later = getLive(db, PRICING, undefined, 6, at('14:30:30'), undefined, [file]);
+    expect(later.combined?.window).toMatchObject({ start: at('14:10:00'), end: at('19:10:00') });
+    expect(later.combined?.machines.map((machine) => machine.machineId)).toEqual([db.machineId]);
+    expect(later.combined?.previous).toMatchObject({ start: at('09:00:00'), responses: 5 });
+    expect(later.machines[1]).toMatchObject({ status: 'stale', stale: false, window: null });
+    expect(later.estimate?.resetsAt).toBe(at('19:10:00'));
+    expect(later.reference.scope.counted).toEqual([]);
+    // The 09:00 window of both computers is remembered, though the Mac's file is stale.
+    expect(JSON.parse(db.getSetting('live_combined_windows') ?? '[]')).toMatchObject([
+      { start: at('09:00:00'), computers: 2 },
+    ]);
   });
 
   it('says when another computer has shared no live data, or needs a newer app', async () => {
@@ -1297,7 +1360,7 @@ describe('other computers', () => {
     expect(alone.reference.scope.counted).toEqual([]);
   });
 
-  it('keeps the other computers of a calibration once their live data is gone', async () => {
+  it('keeps the other computers of a calibration once their live data is stale', async () => {
     const { db, file } = await withMac(LOCAL, MAC);
     expect(calibrate(db, PRICING, 25, NOW, [file])).toEqual({ status: 'done' });
     const limit = (localUnits + macUnits) / 0.25;
@@ -1305,7 +1368,7 @@ describe('other computers', () => {
     // Half an hour later the Mac's file is stale: the calibration still counts it.
     const later = NOW + 30 * MINUTE_MS;
     const live = getLive(db, PRICING, undefined, 6, later, undefined, [file]);
-    expect(live.combined).toBeNull();
+    expect(live.machines[1]?.stale).toBe(true);
     expect(live.reference.calibration).toMatchObject({ at: NOW, percent: 25, computers: 2 });
     expect(live.reference.calibration?.units).toBeCloseTo(limit, 15);
     expect(live.estimate?.reference.kind).toBe('calibration');
@@ -1415,7 +1478,7 @@ describe('other computers', () => {
     // The Mac's app runs, but it was not used in this computer's window.
     const { db, file } = await withMac(LOCAL, [{ at: NOW - 12 * HOUR }]);
     const live = getLive(db, PRICING, undefined, 6, NOW, undefined, [file]);
-    expect(live.reference.scope.counted).toEqual(['MacBook']);
+    expect(live.reference.scope.counted).toEqual([{ name: 'MacBook', liveAtTime: null }]);
     expect(live.combined?.machines.map((machine) => machine.name)).toEqual(['test-machine']);
   });
 

@@ -779,8 +779,8 @@ export interface LiveReference {
   kind: LiveReferenceKind;
   /**
    * The limit (100%) in API-price units. Under `claude`, derived from Claude's % and the
-   * units counted at that moment (every computer with fresh live data, else this one), else
-   * the chosen reference's; null when neither exists.
+   * units counted at that moment (every computer counted, else this one), else the chosen
+   * reference's; null when neither exists.
    */
   units: number | null;
   /**
@@ -846,8 +846,12 @@ export interface LiveCalibration {
 
 /** Whose usage the estimate and the limits count. */
 export interface LiveScope {
-  /** The other computers whose live data is fresh, so counted. Empty: this computer only. */
-  counted: string[];
+  /**
+   * The other computers counted: their live data is fresh, or they have usage in the
+   * running window. `liveAtTime`: when stale live data was written (null while fresh).
+   * Empty: this computer only.
+   */
+  counted: { name: string; liveAtTime: LocalDayTime | null }[];
   /** How many other computers there are (hidden ones left out). */
   others: number;
 }
@@ -875,7 +879,8 @@ export interface LiveReferenceInfo {
  * - `idle`: the last window has reset; the next response starts a new one.
  * - `noData`: no usage at all on this machine.
  * - `noLiveData`: another computer that has not shared live data (`live.json`).
- * - `stale`: another computer whose live data is older than 15 minutes (`liveAt`).
+ * - `stale`: another computer whose live data is older than 15 minutes (`liveAt`) and
+ *   holds no running window.
  * - `needsUpdate`: another computer whose app is too old to share live data.
  * - `newerApp`: another computer whose live data needs a newer version of this app.
  */
@@ -900,12 +905,17 @@ export interface LiveMachine {
   /** Another computer: when its live data was written, epoch milliseconds; else null. */
   liveAt: number | null;
   liveAtTime: LocalDayTime | null;
+  /**
+   * Another computer whose live data is older than 15 minutes, still shown because the
+   * window it holds has not reset (`active`). Always false for this computer.
+   */
+  stale: boolean;
 }
 
 /**
  * The window of every computer together (decision: the limit is per account): the
- * responses of this computer and of the others whose live data is fresh, chained into
- * one series of 5-hour windows.
+ * responses of this computer and of every other that shared live data, however old,
+ * chained into one series of 5-hour windows.
  */
 export interface LiveCombined {
   status: 'active' | 'idle';
@@ -932,8 +942,9 @@ export interface Live {
   /** The selected machines, this one first. */
   machines: LiveMachine[];
   /**
-   * Every computer together, whatever the selection, when another computer's live data
-   * is fresh; null otherwise. The page shows it on top under "All".
+   * Every computer together, whatever the selection, while another computer's live data
+   * is chained in (fresh, or with usage in the last 24 hours, however old the file); null
+   * otherwise. The page shows it on top under "All".
    */
   combined: LiveCombined | null;
   /**

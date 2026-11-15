@@ -1,7 +1,14 @@
 import { Bar, BarChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { LiveHours, LiveMinute, LiveSeries } from '../../shared/types';
 import { strings } from '../i18n';
-import { AXIS_TICK, BAR_CURSOR, CHART_COLORS, niceCeil, seriesColor } from '../lib/chart';
+import {
+  AXIS_TICK,
+  BAR_CURSOR,
+  CHART_COLORS,
+  niceCeil,
+  rightMarginFor,
+  seriesColor,
+} from '../lib/chart';
 import { formatClock, formatTokens, formatTokensAxis } from '../lib/format';
 import { liveSeriesLabel } from '../lib/live';
 import { ChartTooltip, TooltipRow } from './ChartTooltip';
@@ -49,6 +56,9 @@ export function LiveBars({ hours, series, minutes, windowStart, label }: LiveBar
   const ticks = minutes
     .filter((minute) => new Date(minute.t).getMinutes() % every === 0)
     .map((minute) => minute.t);
+  // Room for the last label, centered on its minute, which can be the chart's last one.
+  const lastTick = ticks.at(-1);
+  const right = rightMarginFor(lastTick === undefined ? '' : formatClock(lastTick));
 
   // The minute holding the window's start, when it is inside the chart.
   const startMinute = windowStart !== null ? Math.floor(windowStart / MINUTE_MS) * MINUTE_MS : null;
@@ -63,11 +73,7 @@ export function LiveBars({ hours, series, minutes, windowStart, label }: LiveBar
   return (
     <div className="chart" role="img" aria-label={label}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart
-          data={rows}
-          margin={{ top: 20, right: 12, bottom: 0, left: 0 }}
-          barCategoryGap={0}
-        >
+        <BarChart data={rows} margin={{ top: 20, right, bottom: 0, left: 0 }} barCategoryGap={0}>
           <XAxis
             dataKey="t"
             ticks={ticks}

@@ -273,10 +273,12 @@ export const en = {
       windowHint: (time: string, cost: string) => `since ${time} · ≈ ${cost}`,
       windowHintAll: (time: string, computers: number, cost: string) =>
         `since ${time} · ${computers} computers · ≈ ${cost}`,
+      windowHintStale: (time: string, last: string, cost: string) =>
+        `since ${time} · last data at ${last} · ≈ ${cost}`,
       windowTitle:
         'All tokens of this 5-hour window, subagents included. The cost is an estimate at API prices.',
       windowTitleAll:
-        'Every computer together, in one 5-hour window: Claude’s limit is per account. This computer and the others whose live data is fresh, subagents included. The cost is an estimate at API prices.',
+        'Every computer together, in one 5-hour window: Claude’s limit is per account. This computer and the others that share live data, subagents included (live data older than 15 minutes counts until its window resets). The cost is an estimate at API prices.',
       resets: 'Resets at',
       resetsIn: (countdown: string) => `in ${countdown}`,
       resetsTomorrow: (countdown: string) => `tomorrow, in ${countdown}`,
@@ -298,7 +300,7 @@ export const en = {
       usageNone: 'no finished window to compare with',
       usageNoWindow: 'no 5-hour window running',
       usageTitle:
-        'An estimate for your account, whichever computer is selected. The window’s cost at API prices against the reference that counts as 100%: Claude’s own % while it is current (plus the usage since), else your calibration or your largest finished window. It counts every computer whose live data is fresh. Claude’s own limit is not published.',
+        'An estimate for your account, whichever computer is selected. The window’s cost at API prices against the reference that counts as 100%: Claude’s own % while it is current (plus the usage since), else your calibration or your largest finished window. It counts the other computers whose live data is fresh or has usage in this window. Claude’s own limit is not published.',
       limit: 'Limit reached at',
       limitAt: (time: string) => `~${time}`,
       limitIn: (duration: string) => `in ${duration} at this speed`,
@@ -339,7 +341,10 @@ export const en = {
       scopeAll: (names: string) =>
         `Counts this computer and ${names}, whose live data is fresh (last 15 minutes).`,
       scopeLocal:
-        'Counts this computer only: no other computer has shared live data in the last 15 minutes.',
+        'Counts this computer only: no other computer has fresh live data or usage in this window.',
+      scopeKept: (names: string) =>
+        `Counts this computer and ${names}. Live data older than 15 minutes counts until its window resets.`,
+      scopeLastData: (name: string, last: string) => `${name} (last data at ${last})`,
       calibrateLabel: '% shown by /usage',
       calibrate: 'Calibrate',
       calibrateHint:
@@ -388,6 +393,7 @@ export const en = {
       title: 'Windows by machine',
       thisMachine: 'This computer',
       active: (time: string) => `resets at ${time}`,
+      activeStale: (time: string, last: string) => `resets at ${time} · last data at ${last}`,
       idle: 'no active window',
       noData: 'no usage',
       noLive: 'no live data',
@@ -397,7 +403,7 @@ export const en = {
     },
     watchingOff: 'File watching is off: this page only changes when you scan again.',
     watchingSettings: 'Open Settings',
-    note: 'Estimates use API prices and count every computer whose live data is fresh. 100% is Claude’s own % while it is current, else your calibration or your largest finished window. Claude’s limit is per account and is not published: usage on claude.ai, or on a computer that does not share live data, is not counted.',
+    note: 'Estimates use API prices and count every computer that shares live data (live data older than 15 minutes counts until its window resets). 100% is Claude’s own % while it is current, else your calibration or your largest finished window. Claude’s limit is per account and is not published: usage on claude.ai, or on a computer that does not share live data, is not counted.',
   },
 
   calendar: {

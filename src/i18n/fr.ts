@@ -279,8 +279,10 @@ export const fr: Strings = {
         `depuis ${time} · ${computers} ordinateurs · ≈ ${cost}`,
       windowTitle:
         'Tous les tokens de cette fenêtre de 5 heures, sous-agents compris. Le coût est une estimation aux prix de l’API.',
+      windowHintStale: (time: string, last: string, cost: string) =>
+        `depuis ${time} · dernières données à ${last} · ≈ ${cost}`,
       windowTitleAll:
-        'Tous les ordinateurs ensemble, dans une seule fenêtre de 5 heures\u00a0: la limite de Claude est propre au compte. Cet ordinateur et les autres dont les données en direct sont récentes, sous-agents compris. Le coût est une estimation aux prix de l’API.',
+        'Tous les ordinateurs ensemble, dans une seule fenêtre de 5 heures\u00a0: la limite de Claude est propre au compte. Cet ordinateur et les autres qui partagent leurs données en direct, sous-agents compris (des données de plus de 15 minutes comptent jusqu’à la fin de leur fenêtre). Le coût est une estimation aux prix de l’API.',
       resets: 'Réinitialisation à',
       resetsIn: (countdown: string) => `dans ${countdown}`,
       resetsTomorrow: (countdown: string) => `demain, dans ${countdown}`,
@@ -303,7 +305,7 @@ export const fr: Strings = {
       usageNone: 'aucune fenêtre terminée à comparer',
       usageNoWindow: 'aucune fenêtre de 5 heures en cours',
       usageTitle:
-        'Une estimation pour votre compte, quel que soit l’ordinateur sélectionné. Le coût de la fenêtre aux prix de l’API, rapporté à la référence qui vaut 100\u202f%\u00a0: le % de Claude tant qu’il est à jour (plus l’utilisation depuis), sinon votre calibrage ou votre plus grande fenêtre terminée. Elle compte tous les ordinateurs dont les données en direct sont récentes. La limite de Claude n’est pas publiée.',
+        'Une estimation pour votre compte, quel que soit l’ordinateur sélectionné. Le coût de la fenêtre aux prix de l’API, rapporté à la référence qui vaut 100\u202f%\u00a0: le % de Claude tant qu’il est à jour (plus l’utilisation depuis), sinon votre calibrage ou votre plus grande fenêtre terminée. Elle compte les autres ordinateurs dont les données en direct sont récentes ou ont de l’utilisation dans cette fenêtre. La limite de Claude n’est pas publiée.',
       limit: 'Limite atteinte vers',
       limitAt: (time: string) => `~${time}`,
       limitIn: (duration: string) => `dans ${duration} à cette vitesse`,
@@ -345,7 +347,10 @@ export const fr: Strings = {
       scopeAll: (names: string) =>
         `Compte cet ordinateur et ${names}, dont les données en direct sont récentes (15 dernières minutes).`,
       scopeLocal:
-        'Compte cet ordinateur seulement\u00a0: aucun autre ordinateur n’a partagé de données en direct depuis 15 minutes.',
+        'Compte cet ordinateur seulement\u00a0: aucun autre ordinateur n’a de données en direct récentes ni d’utilisation dans cette fenêtre.',
+      scopeKept: (names: string) =>
+        `Compte cet ordinateur et ${names}. Les données en direct de plus de 15 minutes comptent jusqu’à la fin de leur fenêtre.`,
+      scopeLastData: (name: string, last: string) => `${name} (dernières données à ${last})`,
       calibrateLabel: '% affiché par /usage',
       calibrate: 'Calibrer',
       calibrateHint:
@@ -397,6 +402,7 @@ export const fr: Strings = {
       title: 'Fenêtres par machine',
       thisMachine: 'Cet ordinateur',
       active: (time: string) => `fin à ${time}`,
+      activeStale: (time: string, last: string) => `fin à ${time} · dernières données à ${last}`,
       idle: 'aucune fenêtre active',
       noData: 'aucune utilisation',
       noLive: 'pas de données en direct',
@@ -407,7 +413,7 @@ export const fr: Strings = {
     watchingOff:
       'La surveillance des journaux est désactivée\u00a0: cette page ne change que si vous lancez une analyse.',
     watchingSettings: 'Ouvrir les paramètres',
-    note: 'Les estimations utilisent les prix de l’API et comptent tous les ordinateurs dont les données en direct sont récentes. 100\u202f% correspond au % de Claude tant qu’il est à jour, sinon à votre calibrage ou à votre plus grande fenêtre terminée. La limite de Claude est propre au compte et n’est pas publiée\u00a0: l’utilisation sur claude.ai, ou sur un ordinateur qui ne partage pas de données en direct, n’est pas comptée.',
+    note: 'Les estimations utilisent les prix de l’API et comptent tous les ordinateurs qui partagent leurs données en direct (des données de plus de 15 minutes comptent jusqu’à la fin de leur fenêtre). 100\u202f% correspond au % de Claude tant qu’il est à jour, sinon à votre calibrage ou à votre plus grande fenêtre terminée. La limite de Claude est propre au compte et n’est pas publiée\u00a0: l’utilisation sur claude.ai, ou sur un ordinateur qui ne partage pas de données en direct, n’est pas comptée.',
   },
 
   calendar: {

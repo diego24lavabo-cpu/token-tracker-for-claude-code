@@ -13,9 +13,11 @@
  * (`pricing.json`, per model and token type). Claude does not publish its limits; this is
  * the closest local measure, whereas raw tokens would be mostly cheap cache reads.
  *
- * Other computers share their last hours through `live.json` (see `liveFormat.ts`). While
- * one of them is fresh, every computer's responses are chained into one combined window,
- * and the estimate and the limits count all of them; otherwise only this computer's.
+ * Other computers share their last hours through `live.json` (see `liveFormat.ts`). Every
+ * computer's responses are chained into one combined window, whatever the age of their
+ * live data (usage does not expire). The estimate and the limits count another computer
+ * while its live data is fresh or it has usage in the running window; otherwise only this
+ * computer's.
  */
 import { aliasMap, applyAliases, type AliasMap } from '../shared/projects';
 import type {
@@ -49,6 +51,7 @@ import {
   LIVE_MIN_VERSION,
   LIVE_MINUTE_HOURS,
   LIVE_SCHEMA_VERSION,
+  LIVE_SKEW_MS,
   versionBefore,
   type ActivityRun,
   type LiveFile,
@@ -368,7 +371,7 @@ export function calibrate(
   if (!current || current.units <= 0) return { status: 'noWindow' };
   const stored: Record<string, unknown> = { at: now, percent };
   const inside = (point: LivePoint) => point.ts >= current.start && point.ts <= now;
-  const users = others.filter((other) => other.fresh && other.points.some(inside));
+  const users = account.counted.filter((other) => other.points.some(inside));
   if (account.combined && users.length > 0) {
     stored.start = current.start;
     stored.others = modelRowsOf(users.flatMap((other) => other.points.filter(inside)));
@@ -590,7 +593,13 @@ export function buildLiveFile(db: UsageDatabase, pricing: Pricing, now = Date.no
 interface OtherMachine {
   machine: Omit<SyncMachine, 'problem' | 'conflictCopies'>;
   file: LiveFile | null;
+  /** Written in the last 15 minutes (and not ahead of this clock). */
   fresh: boolean;
+  /**
+   * Its live data counts in the account's windows, whatever its age: usage does not
+   * expire. False without a file, or for a file dated ahead of this clock.
+   */
+  usable: boolean;
   /** Its minutes up to `now`, with this computer's project aliases. */
   points: LivePoint[];
 }
@@ -629,6 +638,7 @@ function otherMachines(db: UsageDatabase, live: readonly LiveFile[], now: number
         machine,
         file,
         fresh: file !== null && isLiveFresh(file, now),
+        usable: file !== null && file.writtenAt <= now + LIVE_SKEW_MS,
         points: file ? pointsOfFile(file, aliases, now) : [],
       };
     });
@@ -666,17 +676,32 @@ export function chainRuns(runs: readonly ActivityRun[], initial: Span | null = n
   return windows;
 }
 
-/** The usage the estimate counts: every computer together, or this one only. */
+/**
+ * The usage the estimate counts: every computer together, or this one only.
+ *
+ * Every other computer's live data goes into the chain of windows, however old: usage does
+ * not expire, so a window the Mac started at 09:00 and left at 10:00 still runs until
+ * 14:00, and the next one starts with the first response after that. Freshness only
+ * changes the wording: `counted` lists the computers whose live data is fresh or that have
+ * usage in the running window.
+ */
 interface AccountUsage {
-  /** True when other computers' fresh live data is counted. */
+  /** True when other computers' live data is chained in (`shared` is not empty). */
   combined: boolean;
   /** The window running at `now`, with its units, or null. */
   current: (Span & { units: number }) | null;
-  /** The points counted: this computer's of the last 6 hours, plus the fresh others'. */
+  /** The points counted: this computer's of the last 6 hours, plus the shared others'. */
   points: LivePoint[];
   /** This computer's points alone. */
   local: LivePoint[];
   burn: LiveBurn;
+  /** The other computers counted now: fresh, or with usage in the running window. */
+  counted: OtherMachine[];
+  /**
+   * The other computers chained in: fresh, or with activity in the last 24 hours, stale
+   * ones included.
+   */
+  shared: OtherMachine[];
   /** Every computer's window chain (combined only), oldest first. */
   spans: Span[];
 }
@@ -689,8 +714,15 @@ function accountUsage(
   local: LivePoint[],
   others: readonly OtherMachine[],
 ): AccountUsage {
-  const fresh = others.filter((other) => other.fresh && other.file);
-  if (fresh.length === 0) {
+  // Before the horizon only this computer's history is known.
+  const horizon = now - LIVE_ACTIVITY_HOURS * 60 * MINUTE_MS;
+  const shared = others.filter(
+    (other) =>
+      other.usable &&
+      other.file !== null &&
+      (other.fresh || other.file.activity.some(([, last]) => last >= horizon)),
+  );
+  if (shared.length === 0) {
     const current = currentWindow(windows, now);
     return {
       combined: false,
@@ -698,13 +730,13 @@ function accountUsage(
       points: local,
       local,
       burn: burnOf(pricing, local, now),
+      counted: [],
+      shared,
       spans: [],
     };
   }
 
-  // Before the horizon only this computer's history is known: its window running then,
-  // if any, starts the chain.
-  const horizon = now - LIVE_ACTIVITY_HOURS * 60 * MINUTE_MS;
+  // This computer's window running at the horizon, if any, starts the chain.
   let initial: Span | null = null;
   for (let index = windows.length - 1; index >= 0; index--) {
     const window = windows[index]!;
@@ -714,7 +746,7 @@ function accountUsage(
   }
   const runs: ActivityRun[] = [];
   for (const row of db.responsesFrom(horizon, now)) runs.push([row.ts, row.ts]);
-  for (const other of fresh) {
+  for (const other of shared) {
     for (const [first, last] of other.file!.activity) {
       // A run that began before the horizon would start a made-up window at it.
       if (first < horizon) continue;
@@ -723,15 +755,23 @@ function accountUsage(
     }
   }
   const spans = chainRuns(runs, initial);
-  const points = [...local, ...fresh.flatMap((other) => other.points)];
+  const points = [...local, ...shared.flatMap((other) => other.points)];
   const last = spans.at(-1);
   const current = last && last.start <= now && now < last.end ? last : null;
+  const counted = shared.filter(
+    (other) =>
+      other.fresh ||
+      (current !== null &&
+        other.points.some((point) => point.ts >= current.start && point.ts <= now)),
+  );
   return {
     combined: true,
     current: current && { ...current, units: unitsOfPoints(pricing, points, current.start, now) },
     points,
     local,
     burn: burnOf(pricing, points, now),
+    counted,
+    shared,
     spans,
   };
 }
@@ -780,41 +820,48 @@ function totalOfRows(rows: readonly ModelRow[]): number {
   return rows.reduce((sum, row) => sum + row[1] + row[2] + row[3] + row[4], 0);
 }
 
-/** The first moment every computer's minutes cover: this one's and the fresh others'. */
-function minutesCovered(now: number, fresh: readonly OtherMachine[]): number {
+/** The first moment every computer's minutes cover: this one's and the given others'. */
+function minutesCovered(now: number, others: readonly OtherMachine[]): number {
   return Math.max(
     firstMinute(LIVE_MINUTE_HOURS, now),
-    ...fresh.map((other) => other.file?.minutesFrom ?? Number.POSITIVE_INFINITY),
+    ...others.map((other) => other.file?.minutesFrom ?? Number.POSITIVE_INFINITY),
   );
 }
 
-/** How many computers have usage in a range: the fresh others, and this one. */
+/** How many computers have usage in a range: the given others, and this one. */
 function usersOf(
   account: AccountUsage,
-  fresh: readonly OtherMachine[],
+  others: readonly OtherMachine[],
   inside: (point: LivePoint) => boolean,
 ): { others: OtherMachine[]; computers: number } {
-  const others = fresh.filter((other) => other.points.some(inside));
-  return { others, computers: others.length + (account.local.some(inside) ? 1 : 0) };
+  const users = others.filter((other) => other.points.some(inside));
+  return { others: users, computers: users.length + (account.local.some(inside) ? 1 : 0) };
+}
+
+/**
+ * True when every computer still sharing its live data wrote it after `at`: a fresh file
+ * written before may still be missing usage up to then. A stale file is the last word of
+ * its computer, so it never holds this back.
+ */
+function writtenAfter(others: readonly OtherMachine[], at: number): boolean {
+  return others.every((other) => !other.fresh || (other.file?.writtenAt ?? 0) >= at);
 }
 
 /**
  * Remembers the combined window that reset last, once every computer's live data covers
- * all of it (its minutes, and written after its reset), when two computers or more used
- * it: the largest of them is a reference, like this computer's own largest window.
+ * all of it (its minutes, and the fresh ones written after its reset), when two computers
+ * or more used it: the largest of them is a reference, like this computer's own largest
+ * window.
  */
-function rememberCombined(
-  db: UsageDatabase,
-  account: AccountUsage,
-  fresh: readonly OtherMachine[],
-  now: number,
-): void {
-  if (!account.combined) return;
-  const span = account.current ? account.spans.at(-2) : account.spans.at(-1);
-  if (!span || span.end > now || span.start < minutesCovered(now, fresh)) return;
-  if (fresh.some((other) => (other.file?.writtenAt ?? 0) < span.end)) return;
+function rememberCombined(db: UsageDatabase, account: AccountUsage, now: number): void {
+  const { spans, shared } = account;
+  const last = spans.at(-1);
+  if (!last) return;
+  const span = last.start <= now && now < last.end ? spans.at(-2) : last;
+  if (!span || span.end > now || span.start < minutesCovered(now, shared)) return;
+  if (!writtenAfter(shared, span.end)) return;
   const inside = (point: LivePoint) => point.ts >= span.start && point.ts < span.end;
-  const users = usersOf(account, fresh, inside).computers;
+  const users = usersOf(account, shared, inside).computers;
   if (users < 2) return;
   const models = modelRowsOf(account.points.filter(inside));
   const stored = storedCombinedWindows(db);
@@ -832,23 +879,20 @@ function rememberCombined(
 /**
  * Completes a combined calibration with the other computers' usage written after it was
  * entered: their copy then could be a few minutes behind, while the % Claude showed
- * counted it. Only while every fresh file was written after it and covers its window, and
- * only upward (a computer whose data went stale since would lower it).
+ * counted it. Only while every fresh file was written after it, every file covers its
+ * window, and only upward (a computer whose live data is gone since would lower it).
  */
-function refineCalibration(
-  db: UsageDatabase,
-  account: AccountUsage,
-  fresh: readonly OtherMachine[],
-): void {
+function refineCalibration(db: UsageDatabase, account: AccountUsage): void {
   const stored = storedCalibration(db);
   const combined = stored?.combined;
-  if (!stored || !combined || !account.combined) return;
-  if (combined.start < Math.max(...fresh.map((other) => other.file?.minutesFrom ?? Infinity))) {
+  const { shared } = account;
+  if (!stored || !combined || shared.length === 0) return;
+  if (combined.start < Math.max(...shared.map((other) => other.file?.minutesFrom ?? Infinity))) {
     return;
   }
-  if (fresh.some((other) => (other.file?.writtenAt ?? 0) < stored.at)) return;
+  if (!writtenAfter(shared, stored.at)) return;
   const inside = (point: LivePoint) => point.ts >= combined.start && point.ts <= stored.at;
-  const users = usersOf(account, fresh, inside);
+  const users = usersOf(account, shared, inside);
   const others = modelRowsOf(users.others.flatMap((other) => other.points.filter(inside)));
   if (totalOfRows(others) <= totalOfRows(combined.others)) return;
   db.setSetting(
@@ -868,16 +912,11 @@ function refineCalibration(
  * that reset last (`rememberCombined`) and the rest of a combined calibration
  * (`refineCalibration`). A failure only costs that memory: it is logged, never thrown.
  */
-function remember(
-  db: UsageDatabase,
-  account: AccountUsage,
-  fresh: readonly OtherMachine[],
-  now: number,
-): void {
-  if (!account.combined) return;
+function remember(db: UsageDatabase, account: AccountUsage, now: number): void {
+  if (account.shared.length === 0) return;
   try {
-    rememberCombined(db, account, fresh, now);
-    refineCalibration(db, account, fresh);
+    rememberCombined(db, account, now);
+    refineCalibration(db, account);
   } catch (error) {
     console.warn(`[live] Could not remember the other computers' usage: ${String(error)}`);
   }
@@ -894,16 +933,11 @@ export function rememberCombinedWindows(
   live: readonly LiveFile[],
   now = Date.now(),
 ): void {
-  if (!live.some((file) => isLiveFresh(file, now))) return;
+  if (live.length === 0) return;
   const windows = localWindows(db, pricing, now);
   const others = otherMachines(db, live, now);
   const account = accountUsage(db, pricing, now, windows, localPointsOf(db, now), others);
-  remember(
-    db,
-    account,
-    others.filter((other) => other.fresh),
-    now,
-  );
+  remember(db, account, now);
 }
 
 // ── The page ──────────────────────────────────────────────────────────────────
@@ -1038,8 +1072,9 @@ function fromFileWindow(
 type MachineState = Omit<LiveMachine, 'machineId' | 'name' | 'platform' | 'isLocal'>;
 
 /**
- * Another computer's window and speed, from its live data when it is fresh. `newer`: its
- * live data needs a newer version of this app.
+ * Another computer's window and speed, from its live data. Stale live data still shows
+ * the window it holds until that window resets (`stale` set); after that the computer
+ * reads as `stale`. `newer`: its live data needs a newer version of this app.
  */
 function otherMachineState(
   pricing: Pricing,
@@ -1057,17 +1092,20 @@ function otherMachineState(
     burn: emptyBurn(),
     liveAt: file?.writtenAt ?? null,
     liveAtTime: file ? timeOf(file.writtenAt) : null,
+    stale: false,
   };
   if (newer && !other.fresh) return { status: 'newerApp', ...none };
   if (!file) {
     const old = versionBefore(other.machine.appVersion, LIVE_MIN_VERSION);
     return { status: old ? 'needsUpdate' : 'noLiveData', ...none };
   }
-  if (!other.fresh) return { status: 'stale', ...none };
+  if (!other.usable) return { status: 'stale', ...none };
 
   const ends = (window: LiveFileWindow) => window.start + WINDOW_MS;
   const shown = file.window && file.window.start <= now ? file.window : null;
   const running = shown && now < ends(shown) ? shown : null;
+  // Stale: only the window it holds is still known, until it resets.
+  if (!other.fresh && !running) return { status: 'stale', ...none };
   const previous = running ? file.previous : (shown ?? file.previous);
   const last = Math.max(file.window?.last ?? 0, file.previous?.last ?? 0) || null;
   return {
@@ -1078,6 +1116,7 @@ function otherMachineState(
     lastResponse: last,
     lastResponseAt: last === null ? null : timeOf(last),
     burn: burnOf(pricing, other.points, now),
+    stale: !other.fresh,
   };
 }
 
@@ -1089,7 +1128,8 @@ function otherMachineState(
  * whose latest `live.json` needs a newer version of this app.
  *
  * The estimate is the account's, whatever the selection: Claude's limit is per account.
- * It counts every computer whose live data is fresh (`combined`), else this one only.
+ * It counts every computer whose live data is fresh or in the running window (`combined`),
+ * else this one only.
  */
 export function getLive(
   db: UsageDatabase,
@@ -1169,11 +1209,11 @@ export function getLive(
     burn: burnOf(pricing, local, now),
     liveAt: null,
     liveAtTime: null,
+    stale: false,
   };
 
   // Every computer together.
   const account = accountUsage(db, pricing, now, windows, local, others);
-  const fresh = others.filter((other) => other.fresh);
   let combined: LiveCombined | null = null;
   if (account.combined) {
     const spans = account.spans;
@@ -1181,7 +1221,7 @@ export function getLive(
     const running = account.current;
     const before = running ? spans.at(-2) : last;
     // Its previous window only when every computer's minutes cover all of it.
-    const covered = minutesCovered(now, fresh);
+    const covered = minutesCovered(now, account.shared);
     // The computers with usage in it (or in the last one, when none runs).
     const shownSpan = running ?? last;
     const used = (points: readonly LivePoint[]) =>
@@ -1197,14 +1237,14 @@ export function getLive(
       burn: account.burn,
       machines: [
         ...(used(local) ? [{ machineId: db.machineId, name: db.machineName }] : []),
-        ...fresh
+        ...account.shared
           .filter((other) => used(other.points))
           .map((other) => ({ machineId: other.machine.id, name: other.machine.name })),
       ],
     };
   }
 
-  remember(db, account, fresh, now);
+  remember(db, account, now);
   const { estimate, reference } = accountEstimate(
     db,
     pricing,
@@ -1215,7 +1255,13 @@ export function getLive(
     others,
     claude,
   );
-  reference.scope = { counted: fresh.map((other) => other.machine.name), others: others.length };
+  reference.scope = {
+    counted: account.counted.map((other) => ({
+      name: other.machine.name,
+      liveAtTime: other.fresh || !other.file ? null : timeOf(other.file.writtenAt),
+    })),
+    others: others.length,
+  };
 
   const machines: LiveMachine[] = [];
   for (const machine of db.listMachines()) {
@@ -1253,7 +1299,7 @@ export function getLive(
 /**
  * The account's estimate and the reference card's data. The limit comes from Claude's %
  * while it is fresh, else from the chosen reference; Claude's % and a calibration count
- * the units of `account` (every computer with fresh live data, else this one).
+ * the units of `account` (every computer counted, else this one).
  */
 function accountEstimate(
   db: UsageDatabase,
